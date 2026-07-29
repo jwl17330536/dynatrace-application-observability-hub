@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import {
   saveConfig,
@@ -102,6 +103,7 @@ function createCustomField(): LookupFieldConfig {
 const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp");
 
 export const Setup: React.FC = () => {
+  const navigate = useNavigate();
   const [state, setState] = useState<SetupState>({
     sources: [DEFAULT_SOURCE],
     defaultSourceId: DEFAULT_SOURCE.sourceId,
@@ -177,32 +179,19 @@ export const Setup: React.FC = () => {
   };
 
   const updateSourceIdentity = (sourceId: string, nextLabel: string, nextTable: string) => {
-    setState((prev) => {
-      const nextSources = prev.sources.map((source) => {
-        if (source.sourceId !== sourceId) {
-          return source;
-        }
-        const nextSourceId = slugify(nextLabel || nextTable || source.sourceId);
-        return {
-          ...source,
-          sourceId: nextSourceId,
-          label: nextLabel,
-          lookupTableName: nextTable,
-        };
-      });
-
-      const previous = prev.sources.find((source) => source.sourceId === sourceId);
-      const previousId = previous?.sourceId;
-      const nextCurrent = nextSources.find((source) => source.label === nextLabel && source.lookupTableName === nextTable);
-      const nextDefault = prev.defaultSourceId === previousId && nextCurrent ? nextCurrent.sourceId : prev.defaultSourceId;
-
-      return {
-        ...prev,
-        error: null,
-        sources: nextSources,
-        defaultSourceId: nextDefault,
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      error: null,
+      sources: prev.sources.map((source) =>
+        source.sourceId === sourceId
+          ? {
+              ...source,
+              label: nextLabel,
+              lookupTableName: nextTable,
+            }
+          : source
+      ),
+    }));
   };
 
   const handleSave = async () => {
@@ -227,9 +216,7 @@ export const Setup: React.FC = () => {
 
       await saveConfig(config);
       setState((prev) => ({ ...prev, isLoading: false, success: true }));
-      setTimeout(() => {
-        window.location.href = "/summary";
-      }, 800);
+      navigate("/summary");
     } catch (err) {
       setState((prev) => ({ ...prev, isLoading: false, error: `Failed to save: ${err}` }));
     }
@@ -266,8 +253,8 @@ export const Setup: React.FC = () => {
       </Paragraph>
 
       <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
-        <Button variant="default" onClick={addSource} disabled={state.isLoading}>
-          Add Lookup Source
+        <Button variant="emphasized" onClick={addSource} disabled={state.isLoading}>
+          Add Another Source
         </Button>
       </div>
 
