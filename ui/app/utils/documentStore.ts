@@ -5,14 +5,26 @@
  */
 
 export interface MappingConfig {
-  dataSourceType: "tags" | "lookup" | "dql";
-  fieldMappings: {
-    appTag: string;
-    appName: string;
-    tier: string;
-    owner: string;
-  };
-  lookupTableName?: string; // For dataSourceType: "lookup" (Phase 2)
+  mode: "lookup";
+  defaultSourceId: string;
+  sources: LookupSourceConfig[];
+}
+
+export type FieldDisplayFormat = "text" | "badge" | "pill";
+
+export interface LookupFieldConfig {
+  id: string;
+  label: string;
+  sourceColumn: string;
+  required?: boolean;
+  format?: FieldDisplayFormat;
+}
+
+export interface LookupSourceConfig {
+  sourceId: string;
+  label: string;
+  lookupTableName: string;
+  fields: LookupFieldConfig[];
 }
 
 const DOCUMENT_STORE_KEY = "observability-hub-app-config-v1";
@@ -90,22 +102,71 @@ export interface ValidationResult {
 export function validateConfig(config: MappingConfig): ValidationResult {
   const errors: string[] = [];
 
-  if (!config.dataSourceType) {
-    errors.push("Data source type is required");
+  if (config.mode !== "lookup") {
+    errors.push("Mode must be 'lookup'");
   }
 
-  const { fieldMappings } = config;
-  if (!fieldMappings.appTag) {
-    errors.push("Application Tag field is required");
+  if (!config.defaultSourceId || !config.defaultSourceId.trim()) {
+    errors.push("Default source is required");
   }
-  if (!fieldMappings.appName) {
-    errors.push("Application Name field is required");
+
+  if (!Array.isArray(config.sources) || config.sources.length === 0) {
+    errors.push("At least one lookup source is required");
+    return {
+      valid: false,
+      errors,
+    };
   }
-  if (!fieldMappings.tier) {
-    errors.push("Tier field is required");
+
+  const sourceIds = new Set<string>();
+  for (const source of config.sources) {
+    if (!source.sourceId || !source.sourceId.trim()) {
+      errors.push("Each source must have a source ID");
+      continue;
+    }
+    if (sourceIds.has(source.sourceId)) {
+      errors.push(`Duplicate source ID: ${source.sourceId}`);
+    }
+    sourceIds.add(source.sourceId);
+
+    if (!source.label || !source.label.trim()) {
+      errors.push(`Source '${source.sourceId}' requires a label`);
+    }
+    if (!source.lookupTableName || !source.lookupTableName.trim()) {
+      errors.push(`Source '${source.sourceId}' requires a lookup table name`);
+    }
+    if (!Array.isArray(source.fields) || source.fields.length === 0) {
+      errors.push(`Source '${source.sourceId}' requires at least one field`);
+      continue;
+    }
+
+    const uniqueField = source.fields.find((field) => field.id === "uniqueApplicationId");
+    if (!uniqueField || !uniqueField.sourceColumn.trim()) {
+      errors.push(`Source '${source.sourceId}' requires a mapped Unique Application ID field`);
+    }
+
+    const fieldIds = new Set<string>();
+    for (const field of source.fields) {
+      if (!field.id || !field.id.trim()) {
+        errors.push(`Source '${source.sourceId}' contains a field without an ID`);
+        continue;
+      }
+      if (fieldIds.has(field.id)) {
+        errors.push(`Source '${source.sourceId}' has duplicate field ID '${field.id}'`);
+      }
+      fieldIds.add(field.id);
+
+      if (!field.label || !field.label.trim()) {
+        errors.push(`Field '${field.id}' in source '${source.sourceId}' requires a label`);
+      }
+      if (!field.sourceColumn || !field.sourceColumn.trim()) {
+        errors.push(`Field '${field.id}' in source '${source.sourceId}' requires a source column`);
+      }
+    }
   }
-  if (!fieldMappings.owner) {
-    errors.push("Owner field is required");
+
+  if (!sourceIds.has(config.defaultSourceId)) {
+    errors.push(`Default source '${config.defaultSourceId}' is not defined`);
   }
 
   return {

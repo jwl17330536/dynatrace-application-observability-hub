@@ -1,7 +1,5 @@
 import { MappingConfig } from "@utils/documentStore";
-import { tagsAdapter } from "./adapters/tagsAdapter";
 import { lookupAdapter } from "./adapters/lookupAdapter";
-import { dqlAdapter } from "./adapters/dqlAdapter";
 
 export interface QuerySet {
   overview: string;
@@ -14,17 +12,20 @@ export interface QuerySet {
  * Routes to appropriate adapter
  */
 export function buildQueriesForDataSource(config: MappingConfig): QuerySet {
-  switch (config.dataSourceType) {
-    case "tags":
-      return tagsAdapter.buildQueries(config.fieldMappings);
-    case "lookup":
-      return lookupAdapter.buildQueries(
-        config.fieldMappings,
-        config.lookupTableName || "applications"
-      );
-    case "dql":
-      return dqlAdapter.buildQueries(config.fieldMappings);
-    default:
-      throw new Error(`Unknown data source type: ${config.dataSourceType}`);
+  if (config.mode === "lookup") {
+    const defaultSource = config.sources.find((source) => source.sourceId === config.defaultSourceId);
+    if (!defaultSource) {
+      throw new Error(`Default source '${config.defaultSourceId}' not found`);
+    }
+
+    return lookupAdapter.buildQueries(
+      defaultSource.fields.map((field) => ({
+        id: field.id,
+        sourceColumn: field.sourceColumn,
+      })),
+      defaultSource.lookupTableName
+    );
   }
+
+  throw new Error(`Unknown mode: ${(config as { mode?: string }).mode}`);
 }

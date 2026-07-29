@@ -23,11 +23,9 @@ export interface QuerySet {
   healthReport: string;
 }
 
-export interface FieldMappings {
-  appTag: string;
-  appName: string;
-  tier: string;
-  owner: string;
+export interface LookupFieldInput {
+  id: string;
+  sourceColumn: string;
 }
 
 /**
@@ -49,16 +47,21 @@ export interface FieldMappings {
  *   | sort by appTag
  */
 const buildOverviewQuery = (
-  fieldMappings: FieldMappings,
+  fields: LookupFieldInput[],
   tableName: string
 ): string => {
+  const selectedFields = fields.filter((field) => field.sourceColumn && field.sourceColumn.trim());
+  const projections = selectedFields
+    .map((field) => `    ${field.id} = this["${field.sourceColumn}"]`)
+    .join(",\n");
+
+  const hasAppName = selectedFields.some((field) => field.id === "applicationName");
+  const sortKey = hasAppName ? "applicationName" : "uniqueApplicationId";
+
   return `fetch data from table "${tableName}"
 | fields 
-    appTag = this["${fieldMappings.appTag}"],
-    appName = this["${fieldMappings.appName}"],
-    tier = this["${fieldMappings.tier}"],
-    owner = this["${fieldMappings.owner}"]
-| sort by appName asc`;
+${projections}
+| sort by ${sortKey} asc`;
 };
 
 /**
@@ -68,8 +71,8 @@ const buildOverviewQuery = (
  * Phase 2: Implement correlation between lookup table and DT infrastructure
  */
 const buildTraceCandidatesQuery = (
-  fieldMappings: FieldMappings,
-  tableName: string
+  _fields: LookupFieldInput[],
+  _tableName: string
 ): string => {
   // Phase 2: Will implement lookup-to-host correlation
   return `fetch dt.entity.host
@@ -83,8 +86,8 @@ const buildTraceCandidatesQuery = (
  * Phase 2: Implement coverage analysis (lookup records with/without DT entities)
  */
 const buildHealthReportQuery = (
-  fieldMappings: FieldMappings,
-  tableName: string
+  _fields: LookupFieldInput[],
+  _tableName: string
 ): string => {
   // Phase 2: Will implement lookup coverage analysis
   return `fetch data from table "${tableName}"
@@ -109,13 +112,13 @@ export const lookupAdapter = {
    * @returns QuerySet with overview, traceCandidates, and healthReport queries
    */
   buildQueries(
-    fieldMappings: FieldMappings,
+    fields: LookupFieldInput[],
     tableName: string = "applications"
   ): QuerySet {
     return {
-      overview: buildOverviewQuery(fieldMappings, tableName),
-      traceCandidates: buildTraceCandidatesQuery(fieldMappings, tableName),
-      healthReport: buildHealthReportQuery(fieldMappings, tableName),
+      overview: buildOverviewQuery(fields, tableName),
+      traceCandidates: buildTraceCandidatesQuery(fields, tableName),
+      healthReport: buildHealthReportQuery(fields, tableName),
     } as QuerySet;
   },
 };

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMappingConfig } from "@hooks/useMappingConfig";
 
 /**
@@ -16,8 +16,8 @@ export const Home: React.FC = () => {
         // No configuration found - go to setup
         navigate("/setup");
       } else {
-        // Configuration exists - go to overview
-        navigate("/overview");
+        // Configuration exists - go to summary
+        navigate("/summary");
       }
     }
   }, [isLoading, config, navigate]);
