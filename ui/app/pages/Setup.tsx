@@ -105,26 +105,20 @@ function createCustomField(): LookupFieldConfig {
 }
 
 function buildPreviewQuery(source: LookupSourceConfig, limit = 1): string {
-  const fields = source.fields
-    .filter((field) => sanitizeColumnName(field.sourceColumn))
-    .map((field) => ({ id: field.id, sourceColumn: sanitizeColumnName(field.sourceColumn) }));
-
   const lookupPath = toLookupPath(source.lookupTableName);
-  if (!fields.length) {
-    return `load "${lookupPath}"\n| limit ${limit}`;
-  }
-
-  const projections = fields
-    .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
-    .join(",\n");
-
-  return `load "${lookupPath}"\n| fieldsAdd\n${projections}\n| limit ${limit}`;
+  return `load "${lookupPath}"\n| limit ${limit}`;
 }
 
 const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp");
 
-function SourcePreview({ request }: { request: PreviewRequest }) {
+function SourcePreview({ request, source }: { request: PreviewRequest; source: LookupSourceConfig }) {
   const { data, isLoading, error } = useDql({ query: request.query });
+  const firstRecord = (data?.records?.[0] || {}) as Record<string, unknown>;
+  const availableColumns = Object.keys(firstRecord);
+  const configuredColumns = source.fields
+    .map((field) => sanitizeColumnName(field.sourceColumn))
+    .filter((name): name is string => Boolean(name));
+  const missingColumns = configuredColumns.filter((name) => !availableColumns.includes(name));
 
   return (
     <div
@@ -162,19 +156,33 @@ function SourcePreview({ request }: { request: PreviewRequest }) {
       )}
 
       {!isLoading && !error && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "10px",
-            backgroundColor: "#fff",
-            border: "1px solid #eee",
-            borderRadius: "4px",
-            fontSize: "12px",
-            overflowX: "auto",
-          }}
-        >
-          {JSON.stringify(data?.records?.[0] ?? {}, null, 2)}
-        </pre>
+        <div>
+          {configuredColumns.length > 0 && (
+            <div style={{ marginBottom: "10px", fontSize: "12px" }}>
+              {missingColumns.length === 0 ? (
+                <span style={{ color: "#1f7a1f" }}>All configured columns were found in the preview row.</span>
+              ) : (
+                <span style={{ color: "#c0392b" }}>
+                  Missing columns in preview row: {missingColumns.join(", ")}
+                </span>
+              )}
+            </div>
+          )}
+
+          <pre
+            style={{
+              margin: 0,
+              padding: "10px",
+              backgroundColor: "#fff",
+              border: "1px solid #eee",
+              borderRadius: "4px",
+              fontSize: "12px",
+              overflowX: "auto",
+            }}
+          >
+            {JSON.stringify(firstRecord, null, 2)}
+          </pre>
+        </div>
       )}
     </div>
   );
@@ -514,6 +522,7 @@ export const Setup: React.FC = () => {
                 <SourcePreview
                   key={`${source.sourceId}-${state.previewBySource[source.sourceId].runId}`}
                   request={state.previewBySource[source.sourceId]}
+                  source={source}
                 />
               )}
             </div>

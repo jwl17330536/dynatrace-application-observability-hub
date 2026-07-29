@@ -5,7 +5,7 @@ import { useDql } from "@dynatrace-sdk/react-hooks";
 import { useMappingConfig } from "@hooks/useMappingConfig";
 
 interface GenericRow {
-  [key: string]: string | number | undefined;
+  [key: string]: unknown;
 }
 
 function sanitizeColumnName(value: string): string {
@@ -88,27 +88,9 @@ export const Overview: React.FC = () => {
       return "";
     }
 
-    const fields = source.fields
-      .filter((field) => sanitizeColumnName(field.sourceColumn))
-      .map((field) => ({ ...field, sourceColumn: sanitizeColumnName(field.sourceColumn) }));
-
     const lookupPath = toLookupPath(source.lookupTableName);
-    if (!fields.length) {
-      return `load "${lookupPath}"\n| limit 200`;
-    }
 
-    const projections = fields
-      .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
-      .join(",\n");
-
-    const hasAppName = fields.some((field) => field.id === "applicationName");
-    const sortKey = hasAppName ? "applicationName" : "uniqueApplicationId";
-
-    return `load "${lookupPath}"
-  | fieldsAdd
-${projections}
-| sort by ${sortKey} asc
-| limit 200`;
+    return `load "${lookupPath}"\n| limit 200`;
   }, [source]);
 
   const { data, isLoading: queryLoading, error: queryError } = useDql({ query: query || "" });
@@ -191,7 +173,17 @@ ${projections}
     );
   }
 
-  const rows: GenericRow[] = (data?.records || []) as GenericRow[];
+  const rows: GenericRow[] = ((data?.records || []) as GenericRow[]).slice().sort((left, right) => {
+    const uniqueField = source.fields.find((field) => field.id === "uniqueApplicationId");
+    const sourceColumn = sanitizeColumnName(uniqueField?.sourceColumn || "");
+    if (!sourceColumn) {
+      return 0;
+    }
+
+    const leftValue = left[sourceColumn] === undefined || left[sourceColumn] === null ? "" : String(left[sourceColumn]);
+    const rightValue = right[sourceColumn] === undefined || right[sourceColumn] === null ? "" : String(right[sourceColumn]);
+    return leftValue.localeCompare(rightValue);
+  });
 
   return (
     <div style={{ padding: "32px" }}>
@@ -261,7 +253,8 @@ ${projections}
                   }}
                 >
                   {source.fields.map((field) => {
-                    const rawValue = row[field.id];
+                    const columnKey = sanitizeColumnName(field.sourceColumn);
+                    const rawValue = columnKey ? row[columnKey] : undefined;
                     const value = rawValue === undefined || rawValue === null ? "" : String(rawValue);
                     return (
                       <td key={field.id} style={{ padding: "12px 16px", color: "#555", verticalAlign: "middle" }}>

@@ -65,27 +65,13 @@ const buildOverviewQuery = (
   fields: LookupFieldInput[],
   tableName: string
 ): string => {
-  const selectedFields = fields
-    .filter((field) => sanitizeColumnName(field.sourceColumn))
-    .map((field) => ({ ...field, sourceColumn: sanitizeColumnName(field.sourceColumn) }));
-
   const lookupPath = toLookupPath(tableName);
-  if (!selectedFields.length) {
+  const hasSelectedFields = fields.some((field) => sanitizeColumnName(field.sourceColumn));
+  if (!hasSelectedFields) {
     return `load "${lookupPath}"\n| limit 200`;
   }
 
-  const projections = selectedFields
-    .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
-    .join(",\n");
-
-  const hasAppName = selectedFields.some((field) => field.id === "applicationName");
-  const sortKey = hasAppName ? "applicationName" : "uniqueApplicationId";
-
-  return `load "${lookupPath}"
-| fieldsAdd 
-${projections}
-| sort by ${sortKey} asc
-| limit 200`;
+  return `load "${lookupPath}"\n| limit 200`;
 };
 
 /**
