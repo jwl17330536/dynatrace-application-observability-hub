@@ -118,7 +118,7 @@ function buildPreviewQuery(source: LookupSourceConfig, limit = 1): string {
     .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
     .join(",\n");
 
-  return `load "${lookupPath}"\n| fields\n${projections}\n| limit ${limit}`;
+  return `load "${lookupPath}"\n| fieldsAdd\n${projections}\n| limit ${limit}`;
 }
 
 const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp");

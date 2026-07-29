@@ -105,7 +105,7 @@ export const Overview: React.FC = () => {
     const sortKey = hasAppName ? "applicationName" : "uniqueApplicationId";
 
     return `load "${lookupPath}"
-| fields
+  | fieldsAdd
 ${projections}
 | sort by ${sortKey} asc
 | limit 200`;
