@@ -1,41 +1,68 @@
-/**
- * Overview Page — Tags-Based Application Table (Phase 1 MVP)
- *
- * Shows all entities tagged with the user-configured tag keys.
- * Generic table that works with any tag names (not CMDB-specific).
- * 
- * Phase 2 pivot: Replace query with lookupAdapter query, table renders identically.
- */
-
 import React from "react";
-import { Heading, Paragraph } from "@dynatrace/strato-components";
+import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useMappingConfig } from "@hooks/useMappingConfig";
 import { useDql } from "@dynatrace-sdk/react-hooks";
+import { buildQueriesForDataSource } from "@utils/queryBuilder";
 
 interface AppRow {
-  [key: string]: string | number;
+  appTag?: string;
+  appName?: string;
+  tier?: string;
+  owner?: string;
+  [key: string]: string | number | undefined;
 }
+
+const BIA_STYLES: Record<string, React.CSSProperties> = {
+  "Business Critical":      { backgroundColor: "#fde8e8", color: "#c0392b", borderColor: "#f5c6c6" },
+  "Business Essential":     { backgroundColor: "#fef3e2", color: "#d35400", borderColor: "#fad7a0" },
+  "Business Important":     { backgroundColor: "#eaf4fb", color: "#2471a3", borderColor: "#aed6f1" },
+  "Non-Business Essential": { backgroundColor: "#f2f3f4", color: "#717d7e", borderColor: "#d5d8dc" },
+};
+
+const BiaPill: React.FC<{ value?: string }> = ({ value }) => {
+  const label = value || "Unknown";
+  const styles = BIA_STYLES[label] ?? { backgroundColor: "#f9f9f9", color: "#888", borderColor: "#ddd" };
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: "2px 10px",
+      borderRadius: "12px",
+      fontSize: "12px",
+      fontWeight: 600,
+      border: "1px solid",
+      ...styles,
+    }}>
+      {label}
+    </span>
+  );
+};
+
+const CentralIdBadge: React.FC<{ value?: string }> = ({ value }) => (
+  <code style={{
+    display: "inline-block",
+    padding: "2px 8px",
+    backgroundColor: "#f5f5f5",
+    border: "1px solid #ddd",
+    borderRadius: "3px",
+    fontSize: "12px",
+    fontWeight: 700,
+    letterSpacing: "0.05em",
+    color: "#333",
+  }}>
+    {value || "—"}
+  </code>
+);
 
 export const Overview: React.FC = () => {
   const { config, isLoading: configLoading, error: configError } = useMappingConfig();
 
-  // Build DQL query from tag mappings
   const query = React.useMemo(() => {
     if (!config) return null;
-    
-    const { appTag, appName, tier, owner } = config.fieldMappings;
-    
-    // Query: Fetch all hosts/services with the specified tags
-    return `fetch dt.entity.host
-    | filter (tags["${appTag}"] != null OR tags["${appName}"] != null OR tags["${tier}"] != null OR tags["${owner}"] != null)
-    | fields 
-        appTag = tags["${appTag}"],
-        appName = tags["${appName}"],
-        tier = tags["${tier}"],
-        owner = tags["${owner}"],
-        entity_id = id
-    | sort by appTag
-    `;
+    try {
+      return buildQueriesForDataSource(config).overview;
+    } catch {
+      return null;
+    }
   }, [config]);
 
   const { data, isLoading: queryLoading, error: queryError } = useDql({ query: query || "" });
@@ -45,106 +72,107 @@ export const Overview: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div style={{ padding: "20px" }}>
-        <Heading level={1}>Application Overview</Heading>
-        <Paragraph>Loading applications from your tags...</Paragraph>
+      <div style={{ padding: "32px" }}>
+        <Heading level={1}>Application Inventory</Heading>
+        <Paragraph style={{ marginTop: "12px", color: "#666" }}>Loading application records...</Paragraph>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div style={{ padding: "20px" }}>
-        <Heading level={1}>Application Overview</Heading>
-        <Paragraph style={{ color: "red" }}>
-          Error loading applications: {typeof error === "string" ? error : String(error)}
-        </Paragraph>
-        <details style={{ marginTop: "20px" }}>
-          <summary>Debug Info</summary>
-          <pre style={{ backgroundColor: "#f5f5f5", padding: "10px", borderRadius: "4px", fontSize: "12px" }}>
-            Config loaded: {config ? "Yes" : "No"}
-            {config && `\nTag mappings: appTag="${config.fieldMappings.appTag}", appName="${config.fieldMappings.appName}", tier="${config.fieldMappings.tier}", owner="${config.fieldMappings.owner}"`}
-            {"\n"}
-            Query: {query}
+      <div style={{ padding: "32px" }}>
+        <Heading level={1}>Application Inventory</Heading>
+        <div style={{ marginTop: "16px", padding: "16px", backgroundColor: "#fff0f0", border: "1px solid #f5c6c6", borderRadius: "6px" }}>
+          <p style={{ margin: "0 0 8px 0", fontWeight: 600, color: "#c0392b" }}>Error loading data</p>
+          <p style={{ margin: "0", fontSize: "13px", color: "#666" }}>{typeof error === "string" ? error : String(error)}</p>
+        </div>
+        <details style={{ marginTop: "12px" }}>
+          <summary style={{ fontSize: "13px", color: "#888", cursor: "pointer" }}>Query details</summary>
+          <pre style={{ marginTop: "8px", padding: "12px", backgroundColor: "#f9f9f9", borderRadius: "4px", fontSize: "12px", overflowX: "auto" }}>
+            {`Table: ${config?.lookupTableName ?? "not configured"}\nCentralID: ${config?.fieldMappings?.appTag ?? "—"}\nAppName:   ${config?.fieldMappings?.appName ?? "—"}\nBIA:       ${config?.fieldMappings?.tier ?? "—"}\nUnitCIO:   ${config?.fieldMappings?.owner ?? "—"}\n\n${query ?? ""}`}
           </pre>
         </details>
-        <a href="/setup" style={{ marginTop: "20px", display: "inline-block", color: "#0051ba" }}>
-          ← Go back to Setup
-        </a>
+        <div style={{ marginTop: "16px" }}>
+          <Button variant="default" onClick={() => { window.location.href = "/setup"; }}>← Back to Setup</Button>
+        </div>
       </div>
     );
   }
 
   if (!config) {
     return (
-      <div style={{ padding: "20px" }}>
-        <Heading level={1}>Application Overview</Heading>
-        <Paragraph>
-          No configuration found. Please complete the setup wizard to define your tag mappings.
-        </Paragraph>
-        <a href="/setup" style={{ marginTop: "20px", display: "inline-block", color: "#0051ba" }}>
-          Go to Setup →
-        </a>
+      <div style={{ padding: "32px" }}>
+        <Heading level={1}>Application Inventory</Heading>
+        <Paragraph style={{ marginTop: "12px" }}>No configuration found.</Paragraph>
+        <div style={{ marginTop: "16px" }}>
+          <Button variant="emphasized" onClick={() => { window.location.href = "/setup"; }}>Configure →</Button>
+        </div>
       </div>
     );
   }
 
-  const applicationData: AppRow[] = (data?.records || []) as AppRow[];
-  const { appTag, appName, tier, owner } = config.fieldMappings;
+  const rows: AppRow[] = (data?.records || []) as AppRow[];
+  const { lookupTableName, fieldMappings } = config;
 
   return (
-    <div style={{ padding: "20px" }}>
-      <Heading level={1}>Application Overview</Heading>
-      <Paragraph>
-        Applications tagged with <code>{appTag}</code>, <code>{appName}</code>, <code>{tier}</code>, <code>{owner}</code>.
-        Found {applicationData.length} entities.
-      </Paragraph>
-
-      {applicationData.length === 0 ? (
-        <div style={{ marginTop: "20px", padding: "12px", backgroundColor: "#fff3cd", borderRadius: "4px" }}>
-          <p style={{ margin: "0", color: "#856404" }}>
-            ⚠️ No entities found with these tag keys. Try:
+    <div style={{ padding: "32px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px" }}>
+        <div>
+          <Heading level={1} style={{ margin: 0 }}>Application Inventory</Heading>
+          <p style={{ margin: "6px 0 0 0", fontSize: "13px", color: "#888" }}>
+            {rows.length} application{rows.length !== 1 ? "s" : ""} · source: <code>{lookupTableName}</code>
           </p>
-          <ul style={{ margin: "8px 0 0 0", color: "#856404" }}>
-            <li>Tag a few hosts in Dynatrace (Infrastructure → Hosts → Edit tags)</li>
-            <li>Use the exact tag keys you defined: {appTag}, {appName}, {tier}, {owner}</li>
-            <li>Return here after tagging (the page auto-refreshes every 30 seconds)</li>
-          </ul>
+        </div>
+        <Button variant="default" onClick={() => { window.location.href = "/setup"; }}>⚙ Reconfigure</Button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ padding: "32px", textAlign: "center", backgroundColor: "#fafafa", border: "1px solid #e8e8e8", borderRadius: "6px" }}>
+          <p style={{ margin: "0 0 8px 0", fontWeight: 600, color: "#555" }}>No applications found</p>
+          <p style={{ margin: 0, fontSize: "13px", color: "#888" }}>
+            The lookup table <code>{lookupTableName}</code> returned no records. Verify the CMDB sync workflow has run.
+          </p>
         </div>
       ) : (
-        <div style={{ overflowX: "auto", marginTop: "20px" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "14px",
-              border: "1px solid #ddd",
-            }}
-          >
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
             <thead>
-              <tr style={{ backgroundColor: "#f5f5f5" }}>
-                <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #ddd", fontWeight: "bold" }}>
-                  {appName}
+              <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#fafafa" }}>
+                <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 600, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", color: "#666", whiteSpace: "nowrap" }}>
+                  {fieldMappings.appTag}
                 </th>
-                <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #ddd", fontWeight: "bold" }}>
-                  {tier}
+                <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 600, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", color: "#666" }}>
+                  Application Name
                 </th>
-                <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #ddd", fontWeight: "bold" }}>
-                  {owner}
+                <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 600, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", color: "#666", whiteSpace: "nowrap" }}>
+                  BIA
                 </th>
-                <th style={{ padding: "12px", textAlign: "left", fontWeight: "bold" }}>
-                  App Tag
+                <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 600, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", color: "#666", whiteSpace: "nowrap" }}>
+                  Unit CIO
                 </th>
               </tr>
             </thead>
             <tbody>
-              {applicationData.map((row, idx) => (
-                <tr key={idx} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: "12px", borderRight: "1px solid #ddd" }}>{row.appName || "-"}</td>
-                  <td style={{ padding: "12px", borderRight: "1px solid #ddd" }}>{row.tier || "-"}</td>
-                  <td style={{ padding: "12px", borderRight: "1px solid #ddd" }}>{row.owner || "-"}</td>
-                  <td style={{ padding: "12px", fontFamily: "monospace", fontSize: "12px", color: "#666" }}>
-                    {row.appTag || "-"}
+              {rows.map((row, idx) => (
+                <tr
+                  key={idx}
+                  style={{
+                    borderBottom: "1px solid #f0f0f0",
+                    backgroundColor: idx % 2 === 0 ? "#fff" : "#fafafa",
+                  }}
+                >
+                  <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                    <CentralIdBadge value={row.appTag as string} />
+                  </td>
+                  <td style={{ padding: "12px 16px", fontWeight: 500, verticalAlign: "middle" }}>
+                    {row.appName || "—"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                    <BiaPill value={row.tier as string} />
+                  </td>
+                  <td style={{ padding: "12px 16px", color: "#555", verticalAlign: "middle" }}>
+                    {row.owner || "—"}
                   </td>
                 </tr>
               ))}
@@ -152,18 +180,6 @@ export const Overview: React.FC = () => {
           </table>
         </div>
       )}
-
-      <div style={{ marginTop: "40px", padding: "16px", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
-        <Heading level={3}>💡 Phase 1 to Phase 2</Heading>
-        <p style={{ margin: "8px 0", fontSize: "14px" }}>
-          This table currently shows entities with <strong>tags</strong>. In Phase 2, you can swap to a <strong>lookup table</strong> (for CMDB data) by:
-        </p>
-        <ol style={{ margin: "8px 0 0 0", fontSize: "14px" }}>
-          <li>Creating a lookup table in Dynatrace (via workflow sync from your CMDB)</li>
-          <li>Updating config to use <code>dataSourceType: "lookup"</code></li>
-          <li><strong>This page renders identically</strong> — no UI changes needed</li>
-        </ol>
-      </div>
     </div>
   );
 };

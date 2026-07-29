@@ -2,7 +2,7 @@
   "app": {
     "id": "my.application.observability.hub",
     "name": "Application Observability Hub",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Multi-tenant hub app for application observability with flexible data sources",
     "scopes": [
       {

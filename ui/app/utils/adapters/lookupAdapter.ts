@@ -58,7 +58,7 @@ const buildOverviewQuery = (
     appName = this["${fieldMappings.appName}"],
     tier = this["${fieldMappings.tier}"],
     owner = this["${fieldMappings.owner}"]
-| sort by appTag`;
+| sort by appName asc`;
 };
 
 /**
