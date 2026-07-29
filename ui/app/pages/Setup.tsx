@@ -73,24 +73,24 @@ function toLookupPath(name: string): string {
   return `/lookups/${trimmed}`;
 }
 
-function createDefaultFields(): LookupFieldConfig[] {
+function createDefaultFields(uniqueRequired: boolean): LookupFieldConfig[] {
   return [
     {
       id: "uniqueApplicationId",
       label: "Unique Application ID",
       sourceColumn: "",
-      required: true,
+      required: uniqueRequired,
       format: "badge",
     },
   ];
 }
 
-function createSource(label: string, tableName: string): LookupSourceConfig {
+function createSource(label: string, tableName: string, uniqueRequired: boolean): LookupSourceConfig {
   return {
     sourceId: slugify(label || tableName || "source"),
     label,
     lookupTableName: tableName,
-    fields: createDefaultFields(),
+    fields: createDefaultFields(uniqueRequired),
   };
 }
 
@@ -109,7 +109,7 @@ function buildPreviewQuery(source: LookupSourceConfig, limit = 1): string {
   return `load "${lookupPath}"\n| limit ${limit}`;
 }
 
-const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp");
+const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp", true);
 
 function SourcePreview({ request, source }: { request: PreviewRequest; source: LookupSourceConfig }) {
   const { data, isLoading, error } = useDql({ query: request.query });
@@ -261,7 +261,7 @@ export const Setup: React.FC = () => {
 
   const addSource = () => {
     const index = state.sources.length + 1;
-    const source = createSource(`Source ${index}`, `lookup_table_${index}`);
+    const source = createSource(`Source ${index}`, `lookup_table_${index}`, false);
     setState((prev) => ({
       ...prev,
       error: null,
@@ -300,7 +300,7 @@ export const Setup: React.FC = () => {
   const removeField = (sourceId: string, fieldId: string) => {
     setSource(sourceId, (source) => {
       const field = source.fields.find((item) => item.id === fieldId);
-      if (field?.required || fieldId === "uniqueApplicationId") {
+      if (field?.required) {
         return source;
       }
       return {
@@ -369,7 +369,7 @@ export const Setup: React.FC = () => {
   };
 
   const resetDefaults = () => {
-    const source = createSource("Applications", "cmdb_businessapp");
+    const source = createSource("Applications", "cmdb_businessapp", true);
     setState((prev) => ({
       ...prev,
       sources: [source],
@@ -393,7 +393,7 @@ export const Setup: React.FC = () => {
     <div style={{ maxWidth: "980px", margin: "0 auto", padding: "40px 24px" }}>
       <Heading level={1}>Application Observability Hub</Heading>
       <Paragraph style={{ marginTop: "8px", color: "#555" }}>
-        Configure one or more Dynatrace lookup tables. Only the Unique Application ID mapping is mandatory.
+        Configure one or more Dynatrace lookup tables. The Unique Application ID mapping is required only once across all sources.
         Add custom fields as needed, then run Load Preview to verify columns before saving.
       </Paragraph>
 
@@ -502,8 +502,8 @@ export const Setup: React.FC = () => {
                         </Button>
                       </div>
                     </div>
-                    {field.id === "uniqueApplicationId" && (
-                      <span style={hintStyle}>Required: Unique Application ID is mandatory for each source.</span>
+                    {field.id === "uniqueApplicationId" && field.required && (
+                      <span style={hintStyle}>Required: map Unique Application ID in at least one source.</span>
                     )}
                   </div>
                 ))}

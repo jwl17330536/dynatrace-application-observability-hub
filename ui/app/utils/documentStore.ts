@@ -101,6 +101,7 @@ export interface ValidationResult {
 
 export function validateConfig(config: MappingConfig): ValidationResult {
   const errors: string[] = [];
+  let hasAnyUniqueApplicationIdMapping = false;
 
   if (config.mode !== "lookup") {
     errors.push("Mode must be 'lookup'");
@@ -141,8 +142,8 @@ export function validateConfig(config: MappingConfig): ValidationResult {
     }
 
     const uniqueField = source.fields.find((field) => field.id === "uniqueApplicationId");
-    if (!uniqueField || !uniqueField.sourceColumn.trim()) {
-      errors.push(`Source '${source.sourceId}' requires a mapped Unique Application ID field`);
+    if (uniqueField && uniqueField.sourceColumn.trim()) {
+      hasAnyUniqueApplicationIdMapping = true;
     }
 
     const fieldIds = new Set<string>();
@@ -167,6 +168,10 @@ export function validateConfig(config: MappingConfig): ValidationResult {
 
   if (!sourceIds.has(config.defaultSourceId)) {
     errors.push(`Default source '${config.defaultSourceId}' is not defined`);
+  }
+
+  if (!hasAnyUniqueApplicationIdMapping) {
+    errors.push("At least one source must map the Unique Application ID field");
   }
 
   return {
