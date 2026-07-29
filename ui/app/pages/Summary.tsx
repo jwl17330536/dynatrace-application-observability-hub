@@ -8,8 +8,19 @@ interface CountRecord {
   count: number;
 }
 
+function toLookupPath(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.startsWith("/lookups/")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("lookups/")) {
+    return `/${trimmed}`;
+  }
+  return `/lookups/${trimmed}`;
+}
+
 function SourceCount({ table }: { table: string }) {
-  const query = `fetch data from table "${table}" | summarize count = count()`;
+  const query = `load "${toLookupPath(table)}" | summarize count = count()`;
   const { data, isLoading, error } = useDql({ query });
 
   if (isLoading) {

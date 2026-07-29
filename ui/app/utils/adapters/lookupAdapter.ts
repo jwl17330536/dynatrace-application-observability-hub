@@ -28,6 +28,21 @@ export interface LookupFieldInput {
   sourceColumn: string;
 }
 
+function sanitizeColumnName(value: string): string {
+  return value.replace(/`/g, "").trim();
+}
+
+function toLookupPath(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.startsWith("/lookups/")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("lookups/")) {
+    return `/${trimmed}`;
+  }
+  return `/lookups/${trimmed}`;
+}
+
 /**
  * Overview query: Fetch all rows from lookup table, project user-defined columns
  * 
@@ -50,18 +65,27 @@ const buildOverviewQuery = (
   fields: LookupFieldInput[],
   tableName: string
 ): string => {
-  const selectedFields = fields.filter((field) => field.sourceColumn && field.sourceColumn.trim());
+  const selectedFields = fields
+    .filter((field) => sanitizeColumnName(field.sourceColumn))
+    .map((field) => ({ ...field, sourceColumn: sanitizeColumnName(field.sourceColumn) }));
+
+  const lookupPath = toLookupPath(tableName);
+  if (!selectedFields.length) {
+    return `load "${lookupPath}"\n| limit 200`;
+  }
+
   const projections = selectedFields
-    .map((field) => `    ${field.id} = this["${field.sourceColumn}"]`)
+    .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
     .join(",\n");
 
   const hasAppName = selectedFields.some((field) => field.id === "applicationName");
   const sortKey = hasAppName ? "applicationName" : "uniqueApplicationId";
 
-  return `fetch data from table "${tableName}"
+  return `load "${lookupPath}"
 | fields 
 ${projections}
-| sort by ${sortKey} asc`;
+| sort by ${sortKey} asc
+| limit 200`;
 };
 
 /**
@@ -90,8 +114,7 @@ const buildHealthReportQuery = (
   _tableName: string
 ): string => {
   // Phase 2: Will implement lookup coverage analysis
-  return `fetch data from table "${tableName}"
-| limit 0`;
+  return "fetch dt.entity.host | limit 0";
 };
 
 /**

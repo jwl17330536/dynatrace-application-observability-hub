@@ -8,6 +8,21 @@ interface GenericRow {
   [key: string]: string | number | undefined;
 }
 
+function sanitizeColumnName(value: string): string {
+  return value.replace(/`/g, "").trim();
+}
+
+function toLookupPath(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.startsWith("/lookups/")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("lookups/")) {
+    return `/${trimmed}`;
+  }
+  return `/lookups/${trimmed}`;
+}
+
 function renderField(format: "text" | "badge" | "pill" | undefined, value: string): React.ReactNode {
   if (!value) {
     return "-";
@@ -73,18 +88,27 @@ export const Overview: React.FC = () => {
       return "";
     }
 
-    const fields = source.fields.filter((field) => field.sourceColumn.trim());
+    const fields = source.fields
+      .filter((field) => sanitizeColumnName(field.sourceColumn))
+      .map((field) => ({ ...field, sourceColumn: sanitizeColumnName(field.sourceColumn) }));
+
+    const lookupPath = toLookupPath(source.lookupTableName);
+    if (!fields.length) {
+      return `load "${lookupPath}"\n| limit 200`;
+    }
+
     const projections = fields
-      .map((field) => `    ${field.id} = this["${field.sourceColumn}"]`)
+      .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
       .join(",\n");
 
     const hasAppName = fields.some((field) => field.id === "applicationName");
     const sortKey = hasAppName ? "applicationName" : "uniqueApplicationId";
 
-    return `fetch data from table "${source.lookupTableName}"
+    return `load "${lookupPath}"
 | fields
 ${projections}
-| sort by ${sortKey} asc`;
+| sort by ${sortKey} asc
+| limit 200`;
   }, [source]);
 
   const { data, isLoading: queryLoading, error: queryError } = useDql({ query: query || "" });

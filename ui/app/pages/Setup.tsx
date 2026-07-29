@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
+import { useDql } from "@dynatrace-sdk/react-hooks";
 import {
+  fetchConfigFromDocumentStore,
   saveConfig,
   validateConfig,
   type LookupSourceConfig,
@@ -9,12 +11,18 @@ import {
   type LookupFieldConfig,
 } from "@utils/documentStore";
 
+interface PreviewRequest {
+  query: string;
+  runId: number;
+}
+
 interface SetupState {
   sources: LookupSourceConfig[];
   defaultSourceId: string;
-  isLoading: boolean;
+  isInitializing: boolean;
+  isSaving: boolean;
   error: string | null;
-  success: boolean;
+  previewBySource: Record<string, PreviewRequest>;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -50,40 +58,36 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "") || "source";
 }
 
+function sanitizeColumnName(value: string): string {
+  return value.replace(/`/g, "").trim();
+}
+
+function toLookupPath(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.startsWith("/lookups/")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("lookups/")) {
+    return `/${trimmed}`;
+  }
+  return `/lookups/${trimmed}`;
+}
+
 function createDefaultFields(): LookupFieldConfig[] {
   return [
     {
       id: "uniqueApplicationId",
       label: "Unique Application ID",
-      sourceColumn: "app_id",
+      sourceColumn: "",
       required: true,
       format: "badge",
-    },
-    {
-      id: "applicationName",
-      label: "Application Name",
-      sourceColumn: "app_name",
-      format: "text",
-    },
-    {
-      id: "applicationTier",
-      label: "Application Tier",
-      sourceColumn: "tier",
-      format: "pill",
-    },
-    {
-      id: "applicationOwner",
-      label: "Application Owner",
-      sourceColumn: "owner",
-      format: "text",
     },
   ];
 }
 
 function createSource(label: string, tableName: string): LookupSourceConfig {
-  const sourceId = slugify(label || tableName || "source");
   return {
-    sourceId,
+    sourceId: slugify(label || tableName || "source"),
     label,
     lookupTableName: tableName,
     fields: createDefaultFields(),
@@ -100,17 +104,137 @@ function createCustomField(): LookupFieldConfig {
   };
 }
 
+function buildPreviewQuery(source: LookupSourceConfig, limit = 1): string {
+  const fields = source.fields
+    .filter((field) => sanitizeColumnName(field.sourceColumn))
+    .map((field) => ({ id: field.id, sourceColumn: sanitizeColumnName(field.sourceColumn) }));
+
+  const lookupPath = toLookupPath(source.lookupTableName);
+  if (!fields.length) {
+    return `load "${lookupPath}"\n| limit ${limit}`;
+  }
+
+  const projections = fields
+    .map((field) => `    ${field.id} = \`${field.sourceColumn}\``)
+    .join(",\n");
+
+  return `load "${lookupPath}"\n| fields\n${projections}\n| limit ${limit}`;
+}
+
 const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp");
+
+function SourcePreview({ request }: { request: PreviewRequest }) {
+  const { data, isLoading, error } = useDql({ query: request.query });
+
+  return (
+    <div
+      style={{
+        marginTop: "12px",
+        padding: "12px",
+        backgroundColor: "#fafafa",
+        border: "1px solid #e5e5e5",
+        borderRadius: "6px",
+      }}
+    >
+      <div style={{ fontSize: "12px", color: "#555", marginBottom: "8px", fontWeight: 600 }}>
+        Preview Query (limit 1)
+      </div>
+      <pre
+        style={{
+          margin: "0 0 10px 0",
+          padding: "10px",
+          backgroundColor: "#fff",
+          border: "1px solid #eee",
+          borderRadius: "4px",
+          fontSize: "12px",
+          overflowX: "auto",
+        }}
+      >
+        {request.query}
+      </pre>
+
+      {isLoading && <div style={{ fontSize: "13px", color: "#666" }}>Loading preview...</div>}
+
+      {error && (
+        <div style={{ fontSize: "13px", color: "#c0392b" }}>
+          Preview error: {typeof error === "string" ? error : String(error)}
+        </div>
+      )}
+
+      {!isLoading && !error && (
+        <pre
+          style={{
+            margin: 0,
+            padding: "10px",
+            backgroundColor: "#fff",
+            border: "1px solid #eee",
+            borderRadius: "4px",
+            fontSize: "12px",
+            overflowX: "auto",
+          }}
+        >
+          {JSON.stringify(data?.records?.[0] ?? {}, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
 
 export const Setup: React.FC = () => {
   const navigate = useNavigate();
+  const [previewRunCounter, setPreviewRunCounter] = useState(0);
   const [state, setState] = useState<SetupState>({
     sources: [DEFAULT_SOURCE],
     defaultSourceId: DEFAULT_SOURCE.sourceId,
-    isLoading: false,
+    isInitializing: true,
+    isSaving: false,
     error: null,
-    success: false,
+    previewBySource: {},
   });
+
+  useEffect(() => {
+    let alive = true;
+
+    const loadSavedConfig = async () => {
+      try {
+        const existing = await fetchConfigFromDocumentStore();
+        if (!alive) {
+          return;
+        }
+
+        if (existing) {
+          const validation = validateConfig(existing);
+          if (validation.valid) {
+            setState((prev) => ({
+              ...prev,
+              sources: existing.sources,
+              defaultSourceId: existing.defaultSourceId,
+              isInitializing: false,
+              error: null,
+            }));
+            return;
+          }
+        }
+
+        setState((prev) => ({ ...prev, isInitializing: false }));
+      } catch (err) {
+        if (!alive) {
+          return;
+        }
+        setState((prev) => ({
+          ...prev,
+          isInitializing: false,
+          error: `Failed to load existing configuration: ${err}`,
+        }));
+      }
+    };
+
+    loadSavedConfig();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const setSource = (sourceId: string, updater: (source: LookupSourceConfig) => LookupSourceConfig) => {
     setState((prev) => ({
@@ -120,11 +244,7 @@ export const Setup: React.FC = () => {
     }));
   };
 
-  const setField = (
-    sourceId: string,
-    fieldId: string,
-    patch: Partial<LookupFieldConfig>
-  ) => {
+  const setField = (sourceId: string, fieldId: string, patch: Partial<LookupFieldConfig>) => {
     setSource(sourceId, (source) => ({
       ...source,
       fields: source.fields.map((field) => (field.id === fieldId ? { ...field, ...patch } : field)),
@@ -149,11 +269,15 @@ export const Setup: React.FC = () => {
 
       const nextSources = prev.sources.filter((source) => source.sourceId !== sourceId);
       const nextDefault = prev.defaultSourceId === sourceId ? nextSources[0].sourceId : prev.defaultSourceId;
+      const nextPreviewBySource = { ...prev.previewBySource };
+      delete nextPreviewBySource[sourceId];
+
       return {
         ...prev,
         error: null,
         sources: nextSources,
         defaultSourceId: nextDefault,
+        previewBySource: nextPreviewBySource,
       };
     });
   };
@@ -194,8 +318,23 @@ export const Setup: React.FC = () => {
     }));
   };
 
+  const runPreview = (source: LookupSourceConfig) => {
+    const query = buildPreviewQuery(source, 1);
+    setPreviewRunCounter((prev) => prev + 1);
+    setState((prev) => ({
+      ...prev,
+      previewBySource: {
+        ...prev.previewBySource,
+        [source.sourceId]: {
+          query,
+          runId: previewRunCounter + 1,
+        },
+      },
+    }));
+  };
+
   const handleSave = async () => {
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    setState((prev) => ({ ...prev, isSaving: true, error: null }));
 
     try {
       const config: MappingConfig = {
@@ -208,38 +347,36 @@ export const Setup: React.FC = () => {
       if (!validation.valid) {
         setState((prev) => ({
           ...prev,
-          isLoading: false,
+          isSaving: false,
           error: validation.errors?.join(" ") || "Invalid configuration",
         }));
         return;
       }
 
       await saveConfig(config);
-      setState((prev) => ({ ...prev, isLoading: false, success: true }));
       navigate("/summary");
     } catch (err) {
-      setState((prev) => ({ ...prev, isLoading: false, error: `Failed to save: ${err}` }));
+      setState((prev) => ({ ...prev, isSaving: false, error: `Failed to save: ${err}` }));
     }
   };
 
   const resetDefaults = () => {
     const source = createSource("Applications", "cmdb_businessapp");
-    setState({
+    setState((prev) => ({
+      ...prev,
       sources: [source],
       defaultSourceId: source.sourceId,
-      isLoading: false,
+      isSaving: false,
       error: null,
-      success: false,
-    });
+      previewBySource: {},
+    }));
   };
 
-  if (state.success) {
+  if (state.isInitializing) {
     return (
       <div style={{ maxWidth: "540px", margin: "80px auto", padding: "0 24px", textAlign: "center" }}>
-        <Heading level={1}>Configuration Saved</Heading>
-        <Paragraph style={{ marginTop: "12px", color: "#555" }}>
-          Loading your configured lookup sources...
-        </Paragraph>
+        <Heading level={1}>Loading Configuration</Heading>
+        <Paragraph style={{ marginTop: "12px", color: "#555" }}>Restoring your last saved lookup setup...</Paragraph>
       </div>
     );
   }
@@ -249,11 +386,11 @@ export const Setup: React.FC = () => {
       <Heading level={1}>Application Observability Hub</Heading>
       <Paragraph style={{ marginTop: "8px", color: "#555" }}>
         Configure one or more Dynatrace lookup tables. Only the Unique Application ID mapping is mandatory.
-        You can remove optional starter fields and add as many custom fields as needed.
+        Add custom fields as needed, then run Load Preview to verify columns before saving.
       </Paragraph>
 
       <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
-        <Button variant="emphasized" onClick={addSource} disabled={state.isLoading}>
+        <Button variant="emphasized" onClick={addSource} disabled={state.isSaving}>
           Add Another Source
         </Button>
       </div>
@@ -265,7 +402,7 @@ export const Setup: React.FC = () => {
               <Heading level={2} style={{ margin: 0 }}>Source {index + 1}</Heading>
               <Button
                 variant="default"
-                disabled={state.isLoading || state.sources.length === 1}
+                disabled={state.isSaving || state.sources.length === 1}
                 onClick={() => removeSource(source.sourceId)}
               >
                 Remove Source
@@ -278,7 +415,7 @@ export const Setup: React.FC = () => {
                 <input
                   style={inputStyle}
                   value={source.label}
-                  disabled={state.isLoading}
+                  disabled={state.isSaving}
                   onChange={(event) => updateSourceIdentity(source.sourceId, event.target.value, source.lookupTableName)}
                 />
               </div>
@@ -287,7 +424,7 @@ export const Setup: React.FC = () => {
                 <input
                   style={inputStyle}
                   value={source.lookupTableName}
-                  disabled={state.isLoading}
+                  disabled={state.isSaving}
                   onChange={(event) => updateSourceIdentity(source.sourceId, source.label, event.target.value)}
                 />
               </div>
@@ -299,7 +436,7 @@ export const Setup: React.FC = () => {
                   type="radio"
                   checked={state.defaultSourceId === source.sourceId}
                   onChange={() => setState((prev) => ({ ...prev, defaultSourceId: source.sourceId, error: null }))}
-                  disabled={state.isLoading}
+                  disabled={state.isSaving}
                 />
                 Use as default source
               </label>
@@ -316,7 +453,7 @@ export const Setup: React.FC = () => {
                         <input
                           style={inputStyle}
                           value={field.label}
-                          disabled={state.isLoading || field.required}
+                          disabled={state.isSaving || field.required}
                           onChange={(event) => setField(source.sourceId, field.id, { label: event.target.value })}
                         />
                       </div>
@@ -325,7 +462,7 @@ export const Setup: React.FC = () => {
                         <input
                           style={inputStyle}
                           value={field.sourceColumn}
-                          disabled={state.isLoading}
+                          disabled={state.isSaving}
                           onChange={(event) => setField(source.sourceId, field.id, { sourceColumn: event.target.value })}
                           placeholder="column_name"
                         />
@@ -335,7 +472,7 @@ export const Setup: React.FC = () => {
                         <select
                           style={{ ...inputStyle, fontFamily: "inherit" }}
                           value={field.format || "text"}
-                          disabled={state.isLoading}
+                          disabled={state.isSaving}
                           onChange={(event) =>
                             setField(source.sourceId, field.id, {
                               format: event.target.value as "text" | "badge" | "pill",
@@ -350,7 +487,7 @@ export const Setup: React.FC = () => {
                       <div>
                         <Button
                           variant="default"
-                          disabled={state.isLoading || field.required || field.id === "uniqueApplicationId"}
+                          disabled={state.isSaving || field.required || field.id === "uniqueApplicationId"}
                           onClick={() => removeField(source.sourceId, field.id)}
                         >
                           Remove
@@ -364,11 +501,21 @@ export const Setup: React.FC = () => {
                 ))}
               </div>
 
-              <div style={{ marginTop: "10px" }}>
-                <Button variant="default" disabled={state.isLoading} onClick={() => addField(source.sourceId)}>
+              <div style={{ marginTop: "10px", display: "flex", gap: "10px" }}>
+                <Button variant="default" disabled={state.isSaving} onClick={() => addField(source.sourceId)}>
                   Add Custom Field
                 </Button>
+                <Button variant="default" disabled={state.isSaving} onClick={() => runPreview(source)}>
+                  Load Preview
+                </Button>
               </div>
+
+              {state.previewBySource[source.sourceId] && (
+                <SourcePreview
+                  key={`${source.sourceId}-${state.previewBySource[source.sourceId].runId}`}
+                  request={state.previewBySource[source.sourceId]}
+                />
+              )}
             </div>
           </div>
         ))}
@@ -381,11 +528,11 @@ export const Setup: React.FC = () => {
       )}
 
       <div style={{ marginTop: "24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Button variant="default" onClick={resetDefaults} disabled={state.isLoading}>
+        <Button variant="default" onClick={resetDefaults} disabled={state.isSaving}>
           Reset to Defaults
         </Button>
-        <Button variant="emphasized" onClick={handleSave} disabled={state.isLoading}>
-          {state.isLoading ? "Saving..." : "Connect & Continue ->"}
+        <Button variant="emphasized" onClick={handleSave} disabled={state.isSaving}>
+          {state.isSaving ? "Saving..." : "Connect & Continue ->"}
         </Button>
       </div>
     </div>
