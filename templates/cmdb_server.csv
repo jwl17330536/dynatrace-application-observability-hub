@@ -1,6 +1,6 @@
 cmdb_ci_key,name,fully_qualified_domain_name,busapp_cmdb_ci_key,location
-# Required fields: cmdb_ci_key (unique), name, busapp_cmdb_ci_key (must exist in cmdb_businessapp)
-# busapp_cmdb_ci_key: Foreign key to cmdb_businessapp.cmdb_ci_key
+# Required fields: cmdb_ci_key (unique), name, busapp_cmdb_ci_key (must exist in your applications table)
+# busapp_cmdb_ci_key: Example foreign key to cmdb_businessapp.cmdb_ci_key
 # fully_qualified_domain_name: Used for matching to Dynatrace dt.entity.host names
 # location: Physical or logical location (datacenter, cloud region, etc.)
 # Example rows:

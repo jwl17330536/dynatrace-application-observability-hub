@@ -1,23 +1,23 @@
-# CMDB Lookup Validation Guide
+# Lookup Validation Guide
 
-**Objective:** Validate that the hub app correctly queries CMDB lookup tables and displays business applications.
+**Objective:** Validate that the hub app correctly queries lookup tables and displays application metadata.
 
 ---
 
 ## Pre-Check: Verify Lookup Tables are Populated
 
-### 1. Query cmdb_businessapp in Dynatrace
+### 1. Query your application lookup table in Dynatrace
 
 Open Dynatrace Query Console (Dynatrace → Data Explorer or `/ui/grail-console`) and run:
 
 ```dql
-fetch data from table "cmdb_businessapp"
+fetch data from table "<YOUR_APP_TABLE>"
 | limit 10
 ```
 
 **Expected Result:**
 - At least 5-10 rows returned
-- Columns visible: `cmdb_ci_key`, `name`, `business_criticality`, `owned_by`, `dv_business_unit`
+- Columns visible: your mapped ID/display/tier/owner columns (for example: `cmdb_ci_key`, `name`, `business_criticality`, `owned_by`)
 - Example:
   ```
   cmdb_ci_key | name                  | business_criticality | owned_by
@@ -26,19 +26,19 @@ fetch data from table "cmdb_businessapp"
   APP-0003    | Slack Integration      | Medium               | Dev Team
   ```
 
-If **empty**, the CMDB workflows haven't synced yet:
-- Check workflow execution logs for `observability-health-cmdb-lookup-sync-workflow-v2`
+If **empty**, your lookup sync hasn't populated data yet:
+- Check execution logs for your lookup sync workflow
 - May take 15-60 minutes on first run
 - Manually trigger workflow if needed
 
-### 2. Query cmdb_server (Optional)
+### 2. Query related lookup tables (Optional)
 
 ```dql
-fetch data from table "cmdb_server"
+fetch data from table "<YOUR_SERVER_TABLE>"
 | limit 5
 ```
 
-Expected: 20+ server records with columns: `cmdb_ci_key`, `name`, `fully_qualified_domain_name`, `busapp_cmdb_ci_key`, `location`
+Expected: records with server identity and an application reference column (if you use host correlation).
 
 ---
 
@@ -52,22 +52,18 @@ Navigate to: `https://<TENANT>/ui/apps/my.application.observability.hub`
 
 ### Step 2: Setup Wizard
 
-**Step 2a: See CMDB Table Options**
-- Page should show three radio button options:
-  1. ✓ Business Applications (selected by default)
-  2. Infrastructure Servers
-  3. App→Frontend RUM Mappings
+**Step 2a: Configure at least one source**
+- Ensure at least one source is present
+- Ensure `Lookup Table Name` is set to your application table (for example `cmdb_businessapp`)
 
-**Step 2b: Verify Option Details**
-- Hover over "Business Applications" to see description:
-  > "Apps from CMDB with criticality, business unit, and RUM config"
-- Click radio button for "Infrastructure Servers":
-  > "Servers from CMDB with FQDN, location, and business app mapping"
+**Step 2b: Map required field**
+- In Field Mappings, set `Unique Application ID` to your unique ID column
+- Add optional fields (display name, tier, owner) as needed
 
 ### Step 3: Save Configuration
 
-- Leave "Business Applications" selected
-- Click "Save & Continue" button
+- Keep your configured default source selected
+- Click "Connect & Continue ->" button
 - Should see loading indicator briefly
 - Should redirect to Overview page
 
@@ -75,12 +71,8 @@ Navigate to: `https://<TENANT>/ui/apps/my.application.observability.hub`
 
 **Expected Display:**
 - Heading: "Application Overview"
-- Subtitle: 'CMDB applications from lookup table "cmdb_businessapp". Found X applications.'
-- Table with 4 columns:
-  1. **Application** (from `name` field)
-  2. **Business Criticality** (from `business_criticality` field)
-  3. **Owner** (from `owned_by` field)
-  4. **ID** (from `cmdb_ci_key` field)
+- Subtitle references your configured source label/table
+- Table columns reflect your mapped fields
 
 **Example Table:**
 ```
@@ -112,10 +104,10 @@ Navigate to: `https://<TENANT>/ui/apps/my.application.observability.hub`
 
 If you want to verify the adapter pattern is working:
 
-**Check 1: Setup.tsx uses CMDB sources**
+**Check 1: Setup.tsx default is backward-compatible but editable**
 ```bash
-grep -n "cmdb_businessapp\|cmdb_server" ui/app/pages/Setup.tsx
-# Should see 3 definitions
+grep -n "DEFAULT_LOOKUP_TABLE_NAME\|Lookup Table Name" ui/app/pages/Setup.tsx
+# Should show a default plus editable table name input
 ```
 
 **Check 2: queryBuilder routes correctly**
@@ -137,7 +129,7 @@ grep -n "buildQueriesForDataSource" ui/app/pages/Overview.tsx
 ### Scenario 1: "No applications found"
 - **Cause:** Lookup table empty or workflow not synced
 - **Fix:** 
-  1. Check lookup table: `fetch data from table "cmdb_businessapp"`
+  1. Check lookup table: `fetch data from table "<YOUR_APP_TABLE>"`
   2. If empty, trigger workflows manually
   3. Wait 5-15 minutes for sync
   4. Refresh app
@@ -146,7 +138,7 @@ grep -n "buildQueriesForDataSource" ui/app/pages/Overview.tsx
 - **Cause:** DQL query syntax error or Document Store issue
 - **Fix:**
   1. Check browser console for full error message
-  2. Verify lookup table exists: `fetch data from table "cmdb_businessapp"`
+  2. Verify lookup table exists: `fetch data from table "<YOUR_APP_TABLE>"`
   3. Clear localStorage (browser DevTools → Application → Local Storage → clear)
   4. Refresh app and redo setup wizard
 
@@ -158,15 +150,9 @@ grep -n "buildQueriesForDataSource" ui/app/pages/Overview.tsx
   3. If errors persist, config saved to localStorage (works, but not shared)
 
 ### Scenario 4: Wrong columns displayed
-- **Cause:** Adapter mapping not updated to CMDB schema
+- **Cause:** Field mapping does not match lookup column names
 - **Fix:**
-  1. Check Setup.tsx has correct field mappings:
-     ```
-     appTag: "cmdb_ci_key",
-     appName: "name",
-     tier: "business_criticality",
-     owner: "owned_by",
-     ```
+  1. Check Setup configuration maps each field label to an existing source column
   2. Rebuild app: `npm run build`
   3. Redeploy: `npx dt-app deploy --non-interactive`
 
@@ -177,10 +163,10 @@ grep -n "buildQueriesForDataSource" ui/app/pages/Overview.tsx
 ✅ **All of the following must pass:**
 
 - [ ] Lookup table `cmdb_businessapp` contains 5+ business applications
-- [ ] App Setup page shows three CMDB table options
-- [ ] Selecting "Business Applications" and saving redirects to Overview
-- [ ] Overview displays table with 4+ business applications
-- [ ] Table columns are: Application, Business Criticality, Owner, ID
+- [ ] App Setup page allows configuring at least one lookup source
+- [ ] Saving configuration redirects to Overview
+- [ ] Overview displays rows from the configured source
+- [ ] Table columns match configured field mappings
 - [ ] Refreshing page shows same data (config persisted)
 - [ ] No errors in browser console (F12 → Console)
 - [ ] No 404 errors in Network tab

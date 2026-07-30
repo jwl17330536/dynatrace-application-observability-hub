@@ -21,12 +21,9 @@ Initial design assumed Dynatrace Gen3 UI tagging for application metadata. Howev
 
 ### Setup Wizard (Setup.tsx)
 **Before:** Users entered 4 tag field names  
-**After:** Users select which CMDB lookup table to display
-- Business Applications (cmdb_businessapp)
-- Infrastructure Servers (cmdb_server)
-- App→Frontend RUM Mappings (cmdb_app_frontend_mapping)
+**After:** Users configure one or more lookup sources and map fields
 
-**Impact:** Zero manual tagging required. Data already synced from CMDB.
+**Impact:** Zero manual tagging required. Data can come from any lookup-backed system of record.
 
 ### Query Builder (queryBuilder.ts)
 **Unchanged:** Already routed to correct adapter  
@@ -35,15 +32,13 @@ Initial design assumed Dynatrace Gen3 UI tagging for application metadata. Howev
 ### Overview Display (Overview.tsx)
 **Before:** Queried `dt.entity.host | filter tags[fieldName]`  
 **After:** Queries `fetch data from table "cmdb_businessapp"`  
-**Result:** Generic table still works with CMDB data
+**Result:** Generic table works with any configured lookup table
 
 ### Data Source Flow
 ```
-CMDB Simulator (cmdb.lindleyhome.com:8088)
-    ↓ (exports: businessapp, server, mapping)
-Dynatrace Workflow (dynatrace-to-cmdb-push)
-    ↓ (maps dt.cost.product to business apps)
-Dynatrace Workflow (observability-health-cmdb-lookup-sync)
+System of Record API (CMDB or equivalent)
+    ↓ (exports: app/server/mapping records)
+Dynatrace Workflow (lookup sync)
     ↓ (normalizes, dedupes)
 Dynatrace Lookup Tables (3 tables)
     ↓ (queries via DQL)
@@ -109,7 +104,7 @@ rum_enabled
 
 ## Validation (Immediate Next Steps)
 
-1. **Verify CMDB Sync**
+1. **Verify Lookup Sync**
    ```bash
    # Query the lookup tables in Dynatrace
    fetch data from table "cmdb_businessapp" | limit 5
@@ -124,7 +119,7 @@ rum_enabled
    - Should navigate to Overview
 
 3. **Test Overview Display**
-   - Should show table with business apps from CMDB
+   - Should show table with business apps from your lookup source
    - Columns: Application name, Business Criticality, Owner, ID
    - Should list 10+ apps from cmdb_businessapp table
 
@@ -147,7 +142,7 @@ rum_enabled
 - ✅ Data flows automatically (CMDB → workflows → lookups)
 - ✅ Works immediately after deployment
 - ✅ No user setup required
-- ✅ Leverages existing dynatrace-cmdb-app infrastructure
+- ✅ Leverages existing lookup sync infrastructure
 - ✅ Scales to 100+ business apps without code changes
 
 ---
@@ -178,16 +173,16 @@ But this is not recommended — CMDB workflows are stable.
 
 ## Questions & Answers
 
-**Q: What if the CMDB simulator is down?**  
-A: Workflows will fail, but the last sync remains in lookup tables. No data loss. Fix the simulator, re-run workflow.
+**Q: What if the source system is down?**  
+A: Sync workflows can fail, but the last successful sync remains in lookup tables. After source recovery, re-run the workflow.
 
 **Q: Can users still use custom tags?**  
 A: Yes, Phase 2 can add "Custom DQL" option. But default is CMDB lookups (more useful).
 
 **Q: Does this break existing deployments?**  
-A: If already deployed with tag-based config, it will show "No applications found" on Overview. Users need to re-run setup and select a CMDB table.
+A: Existing saved lookup configurations remain valid. New setups should configure their own lookup table names.
 
-**Q: How to migrate users from tags to CMDB?**  
+**Q: How to migrate users from tags to lookup-backed sources?**  
 A: Clear localStorage (`observability-hub-app-config-v1`), refresh app, re-run setup wizard.
 
 ---
@@ -206,9 +201,9 @@ A: Clear localStorage (`observability-hub-app-config-v1`), refresh app, re-run s
 ## Deployment Impact
 
 - **App URL:** No change (still deployed to sprint tenant)
-- **Config:** Users need to re-run setup wizard (select CMDB table)
-- **Data:** Lookup tables already populated from CMDB
-- **Workflows:** No changes (already syncing every 15 min)
+- **Config:** Existing saved config remains compatible
+- **Data:** Lookup tables are customer/environment specific
+- **Workflows:** Use your own lookup sync process and schedule
 
 ---
 

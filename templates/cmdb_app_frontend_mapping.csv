@@ -1,5 +1,5 @@
 mapping_key,app_cmdb_ci_key,app_short_name,frontend_entity_id,frontend_name,frontend_type,rum_expected,rum_enabled,rum_domains,mapping_method,mapping_confidence,user_event_count_24h,session_count_24h,last_seen_user_event,notes
-# Required fields: mapping_key (unique), app_cmdb_ci_key (must exist in cmdb_businessapp)
+# Required fields: mapping_key (unique), app_cmdb_ci_key (must exist in your applications table)
 # frontend_entity_id: Dynatrace entity ID (WEB_APPLICATION-xxx) or "none" if not yet mapped
 # frontend_type: web, mobile, desktop, or custom
 # rum_expected: 0 or 1

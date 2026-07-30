@@ -3,13 +3,13 @@
 **Date:** 2026-07-28  
 **Phase:** 1 (Sprint Tenant MVP)  
 **Status:** ✅ Confirmed - CMDB Lookup Schema Verified  
-**Source:** observability-health-cmdb-lookup-sync-workflow-v2.yaml
+**Source:** Application Observability Hub query adapter contract and lookup examples
 
 ---
 
-## CONFIRMED: CMDB Lookup Tables (Authority)
+## Example Lookup Tables (Reference)
 
-These three lookup tables are synced hourly from CMDB simulator (cmdb.lindleyhome.com:8088) by dynatrace-cmdb-app:
+The app works with any Dynatrace lookup table you configure in Setup. The three tables below are a common example dataset:
 
 | Lookup Table | Key | Fields | Example Usage |
 |--------------|-----|--------|----------------|
@@ -33,10 +33,10 @@ This document defines the three core DQL query templates used by Application Obs
 ### Placeholder Pattern
 
 All queries use the pattern `$FIELD_NAME` for substitution. For example:
-- `$APP_TAG_FIELD` → substituted with actual tag name (e.g., `app.tag`) or lookup column (e.g., `CentralID`)
-- `$APP_NAME_FIELD` → substituted with `app.name` or `AppName`
-- `$TIER_FIELD` → substituted with `app.tier` or `BIA`
-- `$OWNER_FIELD` → substituted with `app.owner` or `UnitCIO`
+- `$APP_TAG_FIELD` → substituted with actual tag name (e.g., `app.tag`) or lookup column (e.g., `cmdb_ci_key`)
+- `$APP_NAME_FIELD` → substituted with `app.name` or a lookup display column (e.g., `name`)
+- `$TIER_FIELD` → substituted with `app.tier` or a lookup tier column (e.g., `business_criticality`)
+- `$OWNER_FIELD` → substituted with `app.owner` or a lookup owner column (e.g., `owned_by`)
 
 ### Data Source Adapters
 
@@ -45,7 +45,7 @@ Each adapter converts the user's field mappings to DQL:
 | Adapter | Data Source | Example Mapping | Query Pattern |
 |---------|-------------|-----------------|---------------|
 | **tagsAdapter** | Dynatrace entity tags | `app.tier` | `getTagValue(id, "$TIER_FIELD")` |
-| **lookupAdapter** | CMDB lookup table | `BIA` | `field("$TIER_FIELD")` from `fetch data from table(...)` |
+| **lookupAdapter** | Dynatrace lookup table | `business_criticality` | `field("$TIER_FIELD")` from lookup query |
 | **dqlAdapter** | Custom DQL (advanced) | User-provided | Direct DQL with field substitution |
 
 **Key:** All three adapters return the **same output schema** — visualizations are data-source-agnostic.

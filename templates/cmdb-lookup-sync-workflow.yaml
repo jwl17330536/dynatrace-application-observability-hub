@@ -1,6 +1,6 @@
-# CMDB Lookup Sync Workflow Template
+# Lookup Sync Workflow Template (Example)
 # 
-# This workflow syncs CMDB data into Dynatrace lookup tables.
+# This workflow syncs system-of-record data (CMDB or equivalent) into Dynatrace lookup tables.
 # Deployed from Application Observability Hub during setup.
 #
 # Usage:
@@ -9,8 +9,8 @@
 # 3. Schedule to run hourly for automatic data sync
 
 id: application-observability-hub-cmdb-sync
-title: Application Observability Hub - CMDB Lookup Sync
-description: Syncs CMDB data (Business Apps, Servers, Frontend Mappings) into Dynatrace lookup tables for observability correlation.
+title: Application Observability Hub - Lookup Sync Example
+description: Syncs source data (Business Apps, Servers, Frontend Mappings) into Dynatrace lookup tables for observability correlation.
 private: false
 isdeployed: true
 
@@ -151,7 +151,7 @@ tasks:
               parsePattern: "LD:cmdb_ci_key ',' LD:name ',' LD:short_name ',' LD:owned_by ',' LD:business_criticality ',' LD:dv_business_unit ',' LD:dv_operational_status ',' LD:application_type ',' LD:rum_expected ',' LD:rum_domains",
               lookupField: "cmdb_ci_key",
               displayName: "CMDB Business Applications",
-              description: "Synced from CMDB via Application Observability Hub",
+              description: "Synced from source system via Application Observability Hub",
               fileName: "cmdb_businessapp.csv",
               contentType: "text/csv",
               content: appsCsv
@@ -186,7 +186,7 @@ tasks:
               parsePattern: "LD:cmdb_ci_key ',' LD:name ',' LD:fully_qualified_domain_name ',' LD:busapp_cmdb_ci_key ',' LD:location",
               lookupField: "cmdb_ci_key",
               displayName: "CMDB Servers",
-              description: "Synced from CMDB via Application Observability Hub",
+              description: "Synced from source system via Application Observability Hub",
               fileName: "cmdb_server.csv",
               contentType: "text/csv",
               content: serversCsv
@@ -233,7 +233,7 @@ tasks:
               parsePattern: "LD:mapping_key ',' LD:app_cmdb_ci_key ',' LD:app_short_name ',' LD:frontend_entity_id ',' LD:frontend_name ',' LD:frontend_type ',' LD:rum_expected ',' LD:rum_enabled ',' LD:rum_domains ',' LD:mapping_method ',' LD:mapping_confidence ',' LD:user_event_count_24h ',' LD:session_count_24h ',' LD:last_seen_user_event ',' LD:notes",
               lookupField: "mapping_key",
               displayName: "CMDB App Frontend Mapping",
-              description: "Synced from CMDB via Application Observability Hub",
+              description: "Synced from source system via Application Observability Hub",
               fileName: "cmdb_app_frontend_mapping.csv",
               contentType: "text/csv",
               content: mappingsCsv

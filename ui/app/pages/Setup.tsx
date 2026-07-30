@@ -109,7 +109,8 @@ function buildPreviewQuery(source: LookupSourceConfig, limit = 1): string {
   return `load "${lookupPath}"\n| limit ${limit}`;
 }
 
-const DEFAULT_SOURCE = createSource("Applications", "cmdb_businessapp", true);
+const DEFAULT_LOOKUP_TABLE_NAME = "cmdb_businessapp";
+const DEFAULT_SOURCE = createSource("Primary Applications", DEFAULT_LOOKUP_TABLE_NAME, true);
 
 function SourcePreview({ request, source }: { request: PreviewRequest; source: LookupSourceConfig }) {
   const { data, isLoading, error } = useDql({ query: request.query });
@@ -369,7 +370,8 @@ export const Setup: React.FC = () => {
   };
 
   const resetDefaults = () => {
-    const source = createSource("Applications", "cmdb_businessapp", true);
+    // Keep the existing default table name for backward compatibility.
+    const source = createSource("Primary Applications", DEFAULT_LOOKUP_TABLE_NAME, true);
     setState((prev) => ({
       ...prev,
       sources: [source],
@@ -394,7 +396,8 @@ export const Setup: React.FC = () => {
       <Heading level={1}>Application Observability Hub</Heading>
       <Paragraph style={{ marginTop: "8px", color: "#555" }}>
         Configure one or more Dynatrace lookup tables. The Unique Application ID mapping is required only once across all sources.
-        Add custom fields as needed, then run Load Preview to verify columns before saving.
+        Add custom fields as needed, then run Load Preview to verify columns before saving. You can use any lookup table name;
+        the default is cmdb_businessapp for compatibility with existing deployments.
       </Paragraph>
 
       <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
@@ -435,6 +438,7 @@ export const Setup: React.FC = () => {
                   disabled={state.isSaving}
                   onChange={(event) => updateSourceIdentity(source.sourceId, source.label, event.target.value)}
                 />
+                <span style={hintStyle}>Use any lookup table name (for example: cmdb_businessapp or app_inventory).</span>
               </div>
             </div>
 

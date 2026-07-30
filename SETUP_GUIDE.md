@@ -1,16 +1,16 @@
 # Application Observability Hub - Setup Guide
 
-This guide explains how to configure your CMDB data source for the Application Observability Hub.
+This guide explains how to configure lookup-backed application metadata sources for the Application Observability Hub.
 
 ## Overview
 
-The Application Observability Hub requires three core data sources:
+The Application Observability Hub can run with one or more lookup tables. A common model uses three related tables:
 
 1. **Business Applications** (`cmdb_businessapp`) - Your applications with metadata
 2. **Servers** (`cmdb_server`) - Servers mapped to applications
 3. **Frontend Mappings** (`cmdb_app_frontend_mapping`) - Applications mapped to RUM entities
 
-These must be available as **Dynatrace lookup tables**. You have two options:
+These should be available as **Dynatrace lookup tables**. You have two options:
 
 ### Option 1: Upload CSV Files (Quickest)
 Upload pre-populated CSV files with your data. Good for:
@@ -18,8 +18,8 @@ Upload pre-populated CSV files with your data. Good for:
 - One-time setup
 - Environments without CMDB integration
 
-### Option 2: Configure CMDB Sync (Production)
-Deploy a Dynatrace workflow that automatically syncs from your CMDB. Good for:
+### Option 2: Configure Lookup Sync (Production)
+Deploy a Dynatrace workflow that automatically syncs from your system of record (CMDB or equivalent). Good for:
 - Always up-to-date data
 - Production environments
 - Automatic hourly refresh
@@ -73,7 +73,7 @@ app-automation,Automation Engine,automation,DevOps Team,Business Important,IT In
 | `fully_qualified_domain_name` | | FQDN (for host matching) | `jira-01.prod.local` |
 | `location` | | Physical/cloud location | `US-East-1` |
 
-**Important:** `busapp_cmdb_ci_key` must reference a `cmdb_ci_key` from `cmdb_businessapp.csv`.
+**Important (example schema):** `busapp_cmdb_ci_key` should reference a valid application ID from your applications table (in this example, `cmdb_ci_key` from `cmdb_businessapp.csv`).
 
 **Example:**
 ```csv
@@ -121,7 +121,7 @@ app-mail-prod::mail-web,app-mail-prod,mail,WEB_APPLICATION-yyy,Mail Portal,web,1
 
 ---
 
-## Option 2: Configure CMDB Sync (Production)
+## Option 2: Configure Lookup Sync (Production)
 
 ### Step 1: Prepare CMDB Environment
 
@@ -179,17 +179,17 @@ Each endpoint should return a JSON array of records or an object with a `records
 ]
 ```
 
-### Step 2: Deploy CMDB Sync Workflow
+### Step 2: Deploy Lookup Sync Workflow
 
 1. Navigate to `Setup` page
-2. Click "Configure CMDB Sync"
+2. Click "Configure Lookup Sync"
 3. Enter:
-   - **CMDB URL**: `https://cmdb.example.com:8088` (with port if needed)
-   - **Username**: CMDB API username
-   - **Password**: CMDB API password
+  - **Source URL**: `https://cmdb.example.com:8088` (with port if needed)
+  - **Username**: API username
+  - **Password**: API password
 4. Click "Deploy Sync Workflow"
 5. Hub creates a Dynatrace workflow that:
-   - Fetches data from your CMDB endpoints
+  - Fetches data from your source endpoints
    - Validates and normalizes data
    - Uploads to Dynatrace lookup tables
    - Runs hourly automatically
@@ -197,7 +197,7 @@ Each endpoint should return a JSON array of records or an object with a `records
 ### Step 3: Verify Setup
 
 Hub automatically tests the lookups:
-- Calls `load "/lookups/cmdb_businessapp" | limit 1`
+- Calls `load "/lookups/<your_app_table>" | limit 1` (for the configured default source)
 - Confirms all three tables are populated
 - Proceeds to Overview
 
@@ -218,18 +218,18 @@ Hub automatically tests the lookups:
   1. Ensure every `busapp_cmdb_ci_key` in `cmdb_server.csv` matches a `cmdb_ci_key` in `cmdb_businessapp.csv`
   2. Re-upload files
 
-### "CMDB sync workflow failed"
-- **Cause**: CMDB endpoint unreachable or returns invalid data
+### "Lookup sync workflow failed"
+- **Cause**: Source endpoint unreachable or returns invalid data
 - **Fix**:
-  1. Verify CMDB URL is correct and accessible
+  1. Verify source URL is correct and accessible
   2. Verify credentials
-  3. Check CMDB endpoint response format (should be JSON array or object with `records` field)
+  3. Check endpoint response format (should be JSON array or object with `records` field)
   4. Review workflow execution logs in Dynatrace
 
 ### "No apps showing in Overview"
 - **Cause**: Lookup tables populated but queries returning empty
 - **Fix**:
-  1. Verify lookup tables have data: `load "/lookups/cmdb_businessapp" | limit 5`
+  1. Verify the configured app lookup has data: `load "/lookups/<your_app_table>" | limit 5`
   2. Verify server FQDN matches Dynatrace host entity names
   3. Check host monitoring mode (must not be "OFF")
 
@@ -243,7 +243,7 @@ After setup completes:
 2. **Configure Field Mappings** (if needed) - Map your field names to standard schema
 3. **Explore Trace Candidates** - Find hosts ready for distributed tracing
 4. **Check Health Report** - See CMDB vs Dynatrace coverage by tier
-5. **Schedule Sync** (if using CMDB) - Workflow runs hourly; adjust as needed
+5. **Schedule Sync** (if using source sync) - Workflow runs hourly; adjust as needed
 
 ---
 
@@ -251,5 +251,5 @@ After setup completes:
 
 - **Schema Questions**: See "Field Descriptions" sections above
 - **CSV Validation Errors**: Errors are listed during upload with row numbers
-- **CMDB Integration Issues**: Check workflow logs in Dynatrace
+- **Source Integration Issues**: Check workflow logs in Dynatrace
 - **General Help**: See [README.md](../README.md)
