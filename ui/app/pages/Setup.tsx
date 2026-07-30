@@ -688,7 +688,7 @@ export const Setup: React.FC = () => {
     <div style={{ maxWidth: "980px", margin: "0 auto", padding: "40px 24px" }}>
       <Heading level={1}>Application Observability Hub</Heading>
       <Paragraph style={{ marginTop: "8px", color: "#555" }}>
-        Follow this order: upload lookup CSV, configure source details, map fields, then set join variables.
+        Follow this order: upload lookup CSV (optional), configure source details, map fields, then set join variables.
         The Unique Application ID mapping is required only once across all sources.
       </Paragraph>
 
@@ -713,11 +713,14 @@ export const Setup: React.FC = () => {
             </div>
 
             <div style={{ marginTop: "8px" }}>
-              <Heading level={3} style={{ marginTop: 0, marginBottom: "8px" }}>Step 1: Upload Lookup CSV</Heading>
+              <Heading level={3} style={{ marginTop: 0, marginBottom: "8px" }}>Step 1: Upload Lookup CSV (Optional)</Heading>
               {(() => {
                 const upload = state.uploadBySource[source.sourceId] || createDefaultUploadState();
                 return (
                   <div style={{ border: "1px solid #ececec", borderRadius: "6px", padding: "12px" }}>
+                    <Paragraph style={{ margin: "0 0 10px 0", color: "#666", fontSize: "13px" }}>
+                      Skip this step if your lookup table is already populated by workflows or automation.
+                    </Paragraph>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "end" }}>
                       <div>
                         <label style={labelStyle}>CSV File</label>
