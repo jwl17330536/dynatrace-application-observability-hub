@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useDql } from "@dynatrace-sdk/react-hooks";
@@ -18,11 +18,22 @@ interface PreviewRequest {
   runId: number;
 }
 
+interface LookupUploadState {
+  file: File | null;
+  headers: string[];
+  lookupField: string;
+  overwrite: boolean;
+  isUploading: boolean;
+  message: string | null;
+  error: string | null;
+}
+
 interface SetupState {
   sources: LookupSourceConfig[];
   defaultSourceId: string;
   applicationVariables: ApplicationVariableConfig;
   detectedColumnsBySource: Record<string, string[]>;
+  uploadBySource: Record<string, LookupUploadState>;
   isInitializing: boolean;
   isSaving: boolean;
   error: string | null;
@@ -120,6 +131,59 @@ function buildColumnOptions(detectedColumns: string[], currentValue: string): st
     dedup.add(trimmedCurrent);
   }
   return Array.from(dedup).sort((left, right) => left.localeCompare(right));
+}
+
+function createDefaultUploadState(): LookupUploadState {
+  return {
+    file: null,
+    headers: [],
+    lookupField: "",
+    overwrite: true,
+    isUploading: false,
+    message: null,
+    error: null,
+  };
+}
+
+function parseCsvHeaderLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  result.push(current.trim());
+  return result.map((value) => value.replace(/^"|"$/g, "").trim()).filter((value) => value.length > 0);
+}
+
+function isValidDplFieldName(field: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(field);
+}
+
+function buildCsvParsePattern(headers: string[]): string {
+  return headers
+    .map((header, index) => (index < headers.length - 1 ? `LD:${header} ','` : `LD:${header}`))
+    .join(" ");
 }
 
 const DEFAULT_LOOKUP_TABLE_NAME = "cmdb_businessapp";
@@ -227,6 +291,7 @@ export const Setup: React.FC = () => {
       cmdbVariableSourceId: DEFAULT_SOURCE.sourceId,
     },
     detectedColumnsBySource: {},
+    uploadBySource: {},
     isInitializing: true,
     isSaving: false,
     error: null,
@@ -259,6 +324,7 @@ export const Setup: React.FC = () => {
               ...mergedVariables,
               cmdbVariableSourceId: mergedVariables.cmdbVariableSourceId || existingDefaultSource,
             },
+            uploadBySource: {},
             isInitializing: false,
             error: null,
           }));
@@ -357,6 +423,7 @@ export const Setup: React.FC = () => {
         defaultSourceId: nextDefault,
         applicationVariables: nextVariables,
         detectedColumnsBySource: nextDetectedColumnsBySource,
+        uploadBySource: Object.fromEntries(Object.entries(prev.uploadBySource).filter(([key]) => key !== sourceId)),
         previewBySource: nextPreviewBySource,
       };
     });
@@ -453,10 +520,151 @@ export const Setup: React.FC = () => {
         cmdbVariableSourceId: source.sourceId,
       },
       detectedColumnsBySource: {},
+      uploadBySource: {},
       isSaving: false,
       error: null,
       previewBySource: {},
     }));
+  };
+
+  const setUploadState = (sourceId: string, patch: Partial<LookupUploadState>) => {
+    setState((prev) => ({
+      ...prev,
+      uploadBySource: {
+        ...prev.uploadBySource,
+        [sourceId]: {
+          ...createDefaultUploadState(),
+          ...(prev.uploadBySource[sourceId] || {}),
+          ...patch,
+        },
+      },
+    }));
+  };
+
+  const handleLookupFileSelect = async (sourceId: string, file: File | null) => {
+    if (!file) {
+      setUploadState(sourceId, createDefaultUploadState());
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const firstLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) || "";
+      const headers = parseCsvHeaderLine(firstLine);
+
+      if (!headers.length) {
+        setUploadState(sourceId, {
+          file,
+          headers: [],
+          lookupField: "",
+          error: "Could not detect CSV header row. Ensure the first row contains column names.",
+          message: null,
+        });
+        return;
+      }
+
+      const invalidHeaders = headers.filter((header) => !isValidDplFieldName(header));
+      if (invalidHeaders.length > 0) {
+        setUploadState(sourceId, {
+          file,
+          headers,
+          lookupField: "",
+          error: `Invalid header names for lookup parsing: ${invalidHeaders.join(", ")}. Use letters, numbers, and underscores only.`,
+          message: null,
+        });
+        return;
+      }
+
+      setUploadState(sourceId, {
+        file,
+        headers,
+        lookupField: headers[0],
+        error: null,
+        message: null,
+      });
+    } catch (err) {
+      setUploadState(sourceId, {
+        file,
+        headers: [],
+        lookupField: "",
+        error: `Failed to read file: ${err}`,
+        message: null,
+      });
+    }
+  };
+
+  const uploadLookupFile = async (source: LookupSourceConfig) => {
+    const upload = state.uploadBySource[source.sourceId] || createDefaultUploadState();
+    if (!upload.file) {
+      setUploadState(source.sourceId, { error: "Choose a CSV file first.", message: null });
+      return;
+    }
+    if (!upload.lookupField.trim()) {
+      setUploadState(source.sourceId, { error: "Select a lookup key column.", message: null });
+      return;
+    }
+    if (!upload.headers.length) {
+      setUploadState(source.sourceId, { error: "No CSV headers detected.", message: null });
+      return;
+    }
+
+    setUploadState(source.sourceId, { isUploading: true, error: null, message: null });
+
+    try {
+      const requestPayload = {
+        filePath: toLookupPath(source.lookupTableName),
+        displayName: source.label || source.lookupTableName,
+        description: "Uploaded from Application Observability Hub",
+        lookupField: upload.lookupField,
+        parsePattern: buildCsvParsePattern(upload.headers),
+        skippedRecords: 1,
+        autoFlatten: true,
+        timezone: "UTC",
+        locale: "en_US",
+        overwrite: upload.overwrite,
+      };
+
+      const form = new FormData();
+      form.append("request", new Blob([JSON.stringify(requestPayload)], { type: "application/json" }));
+      form.append("content", upload.file, source.lookupTableName);
+
+      const response = await fetch("/platform/storage/resource-store/v1/files/tabular/lookup:upload", {
+        method: "POST",
+        body: form,
+      });
+
+      const responseText = await response.text();
+      let responseJson: Record<string, unknown> | null = null;
+      if (responseText) {
+        try {
+          responseJson = JSON.parse(responseText) as Record<string, unknown>;
+        } catch {
+          responseJson = null;
+        }
+      }
+
+      if (!response.ok) {
+        const messageFromJson =
+          responseJson && typeof responseJson.message === "string" ? responseJson.message : null;
+        const details = messageFromJson || responseText || response.statusText;
+        throw new Error(details);
+      }
+
+      const inserted = typeof responseJson?.records === "number" ? responseJson.records : "unknown";
+      setUploadState(source.sourceId, {
+        isUploading: false,
+        message: `Upload complete. Inserted records: ${inserted}.`,
+        error: null,
+      });
+
+      runPreview(source);
+    } catch (err) {
+      setUploadState(source.sourceId, {
+        isUploading: false,
+        message: null,
+        error: `Upload failed: ${err}`,
+      });
+    }
   };
 
   if (state.isInitializing) {
@@ -468,8 +676,10 @@ export const Setup: React.FC = () => {
     );
   }
 
-  const selectedCmdbSource =
-    state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0];
+  const selectedCmdbSource = useMemo(
+    () => state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0],
+    [state.applicationVariables.cmdbVariableSourceId, state.sources]
+  );
   const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
   const cmdbIdOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationIdColumn);
   const cmdbNameOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationNameColumn);
@@ -606,6 +816,70 @@ export const Setup: React.FC = () => {
                   Load Preview
                 </Button>
               </div>
+
+              {(() => {
+                const upload = state.uploadBySource[source.sourceId] || createDefaultUploadState();
+                return (
+                  <div style={{ marginTop: "12px", border: "1px solid #ececec", borderRadius: "6px", padding: "12px" }}>
+                    <Heading level={3} style={{ marginTop: 0, marginBottom: "8px" }}>Upload Lookup CSV</Heading>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "end" }}>
+                      <div>
+                        <label style={labelStyle}>CSV File</label>
+                        <input
+                          type="file"
+                          accept=".csv,text/csv"
+                          disabled={state.isSaving || upload.isUploading}
+                          onChange={(event) => handleLookupFileSelect(source.sourceId, event.target.files?.[0] || null)}
+                        />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Lookup Key Column</label>
+                        <select
+                          style={{ ...inputStyle, fontFamily: "inherit" }}
+                          value={upload.lookupField}
+                          disabled={state.isSaving || upload.isUploading || upload.headers.length === 0}
+                          onChange={(event) => setUploadState(source.sourceId, { lookupField: event.target.value })}
+                        >
+                          <option value="">Select key column...</option>
+                          {upload.headers.map((header) => (
+                            <option key={header} value={header}>{header}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: "8px" }}>
+                      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", marginBottom: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={upload.overwrite}
+                          disabled={state.isSaving || upload.isUploading}
+                          onChange={(event) => setUploadState(source.sourceId, { overwrite: event.target.checked })}
+                        />
+                        Overwrite existing lookup table data
+                      </label>
+                    </div>
+
+                    <div style={{ marginTop: "8px", display: "flex", gap: "10px", alignItems: "center" }}>
+                      <Button
+                        variant="emphasized"
+                        disabled={state.isSaving || upload.isUploading || !upload.file || !upload.lookupField}
+                        onClick={() => uploadLookupFile(source)}
+                      >
+                        {upload.isUploading ? "Uploading..." : "Upload to Lookup"}
+                      </Button>
+                      <span style={{ fontSize: "12px", color: "#666" }}>Target: {toLookupPath(source.lookupTableName)}</span>
+                    </div>
+
+                    {upload.error && (
+                      <div style={{ marginTop: "8px", fontSize: "12px", color: "#c0392b" }}>{upload.error}</div>
+                    )}
+                    {upload.message && (
+                      <div style={{ marginTop: "8px", fontSize: "12px", color: "#1f7a1f" }}>{upload.message}</div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {state.previewBySource[source.sourceId] && (
                 <SourcePreview
