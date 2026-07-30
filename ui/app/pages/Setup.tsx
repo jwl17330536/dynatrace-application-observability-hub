@@ -4,8 +4,10 @@ import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useDql } from "@dynatrace-sdk/react-hooks";
 import {
   fetchConfigFromDocumentStore,
+  getDefaultApplicationVariables,
   saveConfig,
   validateConfig,
+  type ApplicationVariableConfig,
   type LookupSourceConfig,
   type MappingConfig,
   type LookupFieldConfig,
@@ -19,6 +21,7 @@ interface PreviewRequest {
 interface SetupState {
   sources: LookupSourceConfig[];
   defaultSourceId: string;
+  applicationVariables: ApplicationVariableConfig;
   isInitializing: boolean;
   isSaving: boolean;
   error: string | null;
@@ -195,6 +198,7 @@ export const Setup: React.FC = () => {
   const [state, setState] = useState<SetupState>({
     sources: [DEFAULT_SOURCE],
     defaultSourceId: DEFAULT_SOURCE.sourceId,
+    applicationVariables: getDefaultApplicationVariables(),
     isInitializing: true,
     isSaving: false,
     error: null,
@@ -212,17 +216,18 @@ export const Setup: React.FC = () => {
         }
 
         if (existing) {
-          const validation = validateConfig(existing);
-          if (validation.valid) {
-            setState((prev) => ({
-              ...prev,
-              sources: existing.sources,
-              defaultSourceId: existing.defaultSourceId,
-              isInitializing: false,
-              error: null,
-            }));
-            return;
-          }
+          setState((prev) => ({
+            ...prev,
+            sources: Array.isArray(existing.sources) && existing.sources.length > 0 ? existing.sources : [DEFAULT_SOURCE],
+            defaultSourceId: existing.defaultSourceId || DEFAULT_SOURCE.sourceId,
+            applicationVariables: {
+              ...getDefaultApplicationVariables(),
+              ...(existing.applicationVariables || {}),
+            },
+            isInitializing: false,
+            error: null,
+          }));
+          return;
         }
 
         setState((prev) => ({ ...prev, isInitializing: false }));
@@ -257,6 +262,17 @@ export const Setup: React.FC = () => {
     setSource(sourceId, (source) => ({
       ...source,
       fields: source.fields.map((field) => (field.id === fieldId ? { ...field, ...patch } : field)),
+    }));
+  };
+
+  const setApplicationVariable = (key: keyof ApplicationVariableConfig, value: string) => {
+    setState((prev) => ({
+      ...prev,
+      error: null,
+      applicationVariables: {
+        ...prev.applicationVariables,
+        [key]: value,
+      },
     }));
   };
 
@@ -350,6 +366,7 @@ export const Setup: React.FC = () => {
         mode: "lookup",
         defaultSourceId: state.defaultSourceId,
         sources: state.sources,
+        applicationVariables: state.applicationVariables,
       };
 
       const validation = validateConfig(config);
@@ -376,6 +393,7 @@ export const Setup: React.FC = () => {
       ...prev,
       sources: [source],
       defaultSourceId: source.sourceId,
+      applicationVariables: getDefaultApplicationVariables(),
       isSaving: false,
       error: null,
       previewBySource: {},
@@ -399,6 +417,66 @@ export const Setup: React.FC = () => {
         Add custom fields as needed, then run Load Preview to verify columns before saving. You can use any lookup table name;
         the default is cmdb_businessapp for compatibility with existing deployments.
       </Paragraph>
+
+      <div style={{ marginTop: "20px", border: "1px solid #e0e0e0", borderRadius: "6px", padding: "18px" }}>
+        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Application Join Variables</Heading>
+        <Paragraph style={{ margin: "0 0 14px 0", color: "#666" }}>
+          These variables drive DQL joins between Dynatrace data and your CMDB lookup rows. Set them to customer-specific field names.
+        </Paragraph>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          <div>
+            <label style={labelStyle}>Dynatrace Application ID Field Path</label>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.dynatraceApplicationIdFieldPath}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("dynatraceApplicationIdFieldPath", event.target.value)}
+              placeholder="example: dt.cost.product"
+            />
+            <span style={hintStyle}>User-defined DQL field path used to read Application ID from Dynatrace entities.</span>
+          </div>
+          <div>
+            <label style={labelStyle}>CMDB Application ID Column</label>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.cmdbApplicationIdColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbApplicationIdColumn", event.target.value)}
+              placeholder="example: cmdb_ci_key"
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>CMDB Application Name Column</label>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.cmdbApplicationNameColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbApplicationNameColumn", event.target.value)}
+              placeholder="example: name"
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>CMDB Owner Column</label>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.cmdbOwnerColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbOwnerColumn", event.target.value)}
+              placeholder="example: owned_by"
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>CMDB Tier Column</label>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.cmdbTierColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbTierColumn", event.target.value)}
+              placeholder="example: business_criticality"
+            />
+          </div>
+        </div>
+      </div>
 
       <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
         <Button variant="emphasized" onClick={addSource} disabled={state.isSaving}>
@@ -499,7 +577,7 @@ export const Setup: React.FC = () => {
                       <div>
                         <Button
                           variant="default"
-                          disabled={state.isSaving || field.required || field.id === "uniqueApplicationId"}
+                          disabled={state.isSaving || field.required}
                           onClick={() => removeField(source.sourceId, field.id)}
                         >
                           Remove

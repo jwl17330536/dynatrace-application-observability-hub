@@ -34,8 +34,8 @@ export const App = () => {
           <Route path="/" element={<Home />} />
           <Route path="/setup" element={<Setup />} />
           <Route path="/summary" element={<Summary />} />
+          <Route path="/overview" element={<Overview />} />
           <Route path="/overview/:sourceId" element={<Overview />} />
-          <Route path="/overview" element={<Navigate to="/summary" />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Page.Main>

@@ -132,6 +132,10 @@ export const Summary: React.FC = () => {
       </div>
 
       <div style={{ marginTop: "18px" }}>
+        <Button onClick={() => navigate("/overview")} variant="emphasized">Open Application Dashboard</Button>
+      </div>
+
+      <div style={{ marginTop: "10px" }}>
         <Button onClick={() => navigate("/setup")} variant="default">Reconfigure Sources</Button>
       </div>
     </div>

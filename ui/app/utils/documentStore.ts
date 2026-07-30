@@ -8,6 +8,15 @@ export interface MappingConfig {
   mode: "lookup";
   defaultSourceId: string;
   sources: LookupSourceConfig[];
+  applicationVariables: ApplicationVariableConfig;
+}
+
+export interface ApplicationVariableConfig {
+  dynatraceApplicationIdFieldPath: string;
+  cmdbApplicationIdColumn: string;
+  cmdbApplicationNameColumn: string;
+  cmdbOwnerColumn: string;
+  cmdbTierColumn: string;
 }
 
 export type FieldDisplayFormat = "text" | "badge" | "pill";
@@ -99,6 +108,16 @@ export interface ValidationResult {
   errors?: string[];
 }
 
+export function getDefaultApplicationVariables(): ApplicationVariableConfig {
+  return {
+    dynatraceApplicationIdFieldPath: "",
+    cmdbApplicationIdColumn: "",
+    cmdbApplicationNameColumn: "",
+    cmdbOwnerColumn: "",
+    cmdbTierColumn: "",
+  };
+}
+
 export function validateConfig(config: MappingConfig): ValidationResult {
   const errors: string[] = [];
   let hasAnyUniqueApplicationIdMapping = false;
@@ -168,6 +187,27 @@ export function validateConfig(config: MappingConfig): ValidationResult {
 
   if (!sourceIds.has(config.defaultSourceId)) {
     errors.push(`Default source '${config.defaultSourceId}' is not defined`);
+  }
+
+  const vars = config.applicationVariables;
+  if (!vars) {
+    errors.push("Application variables are required");
+  } else {
+    if (!vars.dynatraceApplicationIdFieldPath || !vars.dynatraceApplicationIdFieldPath.trim()) {
+      errors.push("Dynatrace Application ID field path is required");
+    }
+    if (!vars.cmdbApplicationIdColumn || !vars.cmdbApplicationIdColumn.trim()) {
+      errors.push("CMDB Application ID column is required");
+    }
+    if (!vars.cmdbApplicationNameColumn || !vars.cmdbApplicationNameColumn.trim()) {
+      errors.push("CMDB Application Name column is required");
+    }
+    if (!vars.cmdbOwnerColumn || !vars.cmdbOwnerColumn.trim()) {
+      errors.push("CMDB Owner column is required");
+    }
+    if (!vars.cmdbTierColumn || !vars.cmdbTierColumn.trim()) {
+      errors.push("CMDB Tier column is required");
+    }
   }
 
   if (!hasAnyUniqueApplicationIdMapping) {
