@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useDql } from "@dynatrace-sdk/react-hooks";
@@ -22,6 +22,7 @@ interface SetupState {
   sources: LookupSourceConfig[];
   defaultSourceId: string;
   applicationVariables: ApplicationVariableConfig;
+  detectedColumnsBySource: Record<string, string[]>;
   isInitializing: boolean;
   isSaving: boolean;
   error: string | null;
@@ -112,10 +113,27 @@ function buildPreviewQuery(source: LookupSourceConfig, limit = 1): string {
   return `load "${lookupPath}"\n| limit ${limit}`;
 }
 
+function buildColumnOptions(detectedColumns: string[], currentValue: string): string[] {
+  const dedup = new Set(detectedColumns);
+  const trimmedCurrent = currentValue.trim();
+  if (trimmedCurrent) {
+    dedup.add(trimmedCurrent);
+  }
+  return Array.from(dedup).sort((left, right) => left.localeCompare(right));
+}
+
 const DEFAULT_LOOKUP_TABLE_NAME = "cmdb_businessapp";
 const DEFAULT_SOURCE = createSource("Primary Applications", DEFAULT_LOOKUP_TABLE_NAME, true);
 
-function SourcePreview({ request, source }: { request: PreviewRequest; source: LookupSourceConfig }) {
+function SourcePreview({
+  request,
+  source,
+  onColumnsDetected,
+}: {
+  request: PreviewRequest;
+  source: LookupSourceConfig;
+  onColumnsDetected: (sourceId: string, columns: string[]) => void;
+}) {
   const { data, isLoading, error } = useDql({ query: request.query });
   const firstRecord = (data?.records?.[0] || {}) as Record<string, unknown>;
   const availableColumns = Object.keys(firstRecord);
@@ -123,6 +141,12 @@ function SourcePreview({ request, source }: { request: PreviewRequest; source: L
     .map((field) => sanitizeColumnName(field.sourceColumn))
     .filter((name): name is string => Boolean(name));
   const missingColumns = configuredColumns.filter((name) => !availableColumns.includes(name));
+
+  useEffect(() => {
+    if (!isLoading && !error) {
+      onColumnsDetected(source.sourceId, availableColumns);
+    }
+  }, [availableColumns, error, isLoading, onColumnsDetected, source.sourceId]);
 
   return (
     <div
@@ -198,7 +222,11 @@ export const Setup: React.FC = () => {
   const [state, setState] = useState<SetupState>({
     sources: [DEFAULT_SOURCE],
     defaultSourceId: DEFAULT_SOURCE.sourceId,
-    applicationVariables: getDefaultApplicationVariables(),
+    applicationVariables: {
+      ...getDefaultApplicationVariables(),
+      cmdbVariableSourceId: DEFAULT_SOURCE.sourceId,
+    },
+    detectedColumnsBySource: {},
     isInitializing: true,
     isSaving: false,
     error: null,
@@ -216,13 +244,20 @@ export const Setup: React.FC = () => {
         }
 
         if (existing) {
+          const existingSources = Array.isArray(existing.sources) && existing.sources.length > 0 ? existing.sources : [DEFAULT_SOURCE];
+          const existingDefaultSource = existing.defaultSourceId || existingSources[0].sourceId;
+          const mergedVariables = {
+            ...getDefaultApplicationVariables(),
+            ...(existing.applicationVariables || {}),
+          };
+
           setState((prev) => ({
             ...prev,
-            sources: Array.isArray(existing.sources) && existing.sources.length > 0 ? existing.sources : [DEFAULT_SOURCE],
-            defaultSourceId: existing.defaultSourceId || DEFAULT_SOURCE.sourceId,
+            sources: existingSources,
+            defaultSourceId: existingDefaultSource,
             applicationVariables: {
-              ...getDefaultApplicationVariables(),
-              ...(existing.applicationVariables || {}),
+              ...mergedVariables,
+              cmdbVariableSourceId: mergedVariables.cmdbVariableSourceId || existingDefaultSource,
             },
             isInitializing: false,
             error: null,
@@ -276,6 +311,16 @@ export const Setup: React.FC = () => {
     }));
   };
 
+  const setDetectedColumns = (sourceId: string, columns: string[]) => {
+    setState((prev) => ({
+      ...prev,
+      detectedColumnsBySource: {
+        ...prev.detectedColumnsBySource,
+        [sourceId]: columns,
+      },
+    }));
+  };
+
   const addSource = () => {
     const index = state.sources.length + 1;
     const source = createSource(`Source ${index}`, `lookup_table_${index}`, false);
@@ -296,12 +341,22 @@ export const Setup: React.FC = () => {
       const nextDefault = prev.defaultSourceId === sourceId ? nextSources[0].sourceId : prev.defaultSourceId;
       const nextPreviewBySource = { ...prev.previewBySource };
       delete nextPreviewBySource[sourceId];
+      const nextDetectedColumnsBySource = { ...prev.detectedColumnsBySource };
+      delete nextDetectedColumnsBySource[sourceId];
+
+      const nextVariables = {
+        ...prev.applicationVariables,
+        cmdbVariableSourceId:
+          prev.applicationVariables.cmdbVariableSourceId === sourceId ? nextSources[0].sourceId : prev.applicationVariables.cmdbVariableSourceId,
+      };
 
       return {
         ...prev,
         error: null,
         sources: nextSources,
         defaultSourceId: nextDefault,
+        applicationVariables: nextVariables,
+        detectedColumnsBySource: nextDetectedColumnsBySource,
         previewBySource: nextPreviewBySource,
       };
     });
@@ -393,7 +448,11 @@ export const Setup: React.FC = () => {
       ...prev,
       sources: [source],
       defaultSourceId: source.sourceId,
-      applicationVariables: getDefaultApplicationVariables(),
+      applicationVariables: {
+        ...getDefaultApplicationVariables(),
+        cmdbVariableSourceId: source.sourceId,
+      },
+      detectedColumnsBySource: {},
       isSaving: false,
       error: null,
       previewBySource: {},
@@ -409,6 +468,16 @@ export const Setup: React.FC = () => {
     );
   }
 
+  const selectedCmdbSource = useMemo(
+    () => state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0],
+    [state.applicationVariables.cmdbVariableSourceId, state.sources]
+  );
+  const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
+  const cmdbIdOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationIdColumn);
+  const cmdbNameOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationNameColumn);
+  const cmdbOwnerOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbOwnerColumn);
+  const cmdbTierOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbTierColumn);
+
   return (
     <div style={{ maxWidth: "980px", margin: "0 auto", padding: "40px 24px" }}>
       <Heading level={1}>Application Observability Hub</Heading>
@@ -417,66 +486,6 @@ export const Setup: React.FC = () => {
         Add custom fields as needed, then run Load Preview to verify columns before saving. You can use any lookup table name;
         the default is cmdb_businessapp for compatibility with existing deployments.
       </Paragraph>
-
-      <div style={{ marginTop: "20px", border: "1px solid #e0e0e0", borderRadius: "6px", padding: "18px" }}>
-        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Application Join Variables</Heading>
-        <Paragraph style={{ margin: "0 0 14px 0", color: "#666" }}>
-          These variables drive DQL joins between Dynatrace data and your CMDB lookup rows. Set them to customer-specific field names.
-        </Paragraph>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-          <div>
-            <label style={labelStyle}>Dynatrace Application ID Field Path</label>
-            <input
-              style={inputStyle}
-              value={state.applicationVariables.dynatraceApplicationIdFieldPath}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("dynatraceApplicationIdFieldPath", event.target.value)}
-              placeholder="example: dt.cost.product"
-            />
-            <span style={hintStyle}>User-defined DQL field path used to read Application ID from Dynatrace entities.</span>
-          </div>
-          <div>
-            <label style={labelStyle}>CMDB Application ID Column</label>
-            <input
-              style={inputStyle}
-              value={state.applicationVariables.cmdbApplicationIdColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbApplicationIdColumn", event.target.value)}
-              placeholder="example: cmdb_ci_key"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>CMDB Application Name Column</label>
-            <input
-              style={inputStyle}
-              value={state.applicationVariables.cmdbApplicationNameColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbApplicationNameColumn", event.target.value)}
-              placeholder="example: name"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>CMDB Owner Column</label>
-            <input
-              style={inputStyle}
-              value={state.applicationVariables.cmdbOwnerColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbOwnerColumn", event.target.value)}
-              placeholder="example: owned_by"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>CMDB Tier Column</label>
-            <input
-              style={inputStyle}
-              value={state.applicationVariables.cmdbTierColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbTierColumn", event.target.value)}
-              placeholder="example: business_criticality"
-            />
-          </div>
-        </div>
-      </div>
 
       <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
         <Button variant="emphasized" onClick={addSource} disabled={state.isSaving}>
@@ -605,11 +614,114 @@ export const Setup: React.FC = () => {
                   key={`${source.sourceId}-${state.previewBySource[source.sourceId].runId}`}
                   request={state.previewBySource[source.sourceId]}
                   source={source}
+                  onColumnsDetected={setDetectedColumns}
                 />
               )}
             </div>
           </div>
         ))}
+      </div>
+
+      <div style={{ marginTop: "20px", border: "1px solid #e0e0e0", borderRadius: "6px", padding: "18px" }}>
+        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Application Join Variables</Heading>
+        <Paragraph style={{ margin: "0 0 14px 0", color: "#666" }}>
+          Choose the CMDB source first, run Load Preview for that source, then map join variables from detected columns.
+        </Paragraph>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          <div>
+            <label style={labelStyle}>CMDB Variable Source</label>
+            <select
+              style={{ ...inputStyle, fontFamily: "inherit" }}
+              value={state.applicationVariables.cmdbVariableSourceId}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbVariableSourceId", event.target.value)}
+            >
+              {state.sources.map((source) => (
+                <option key={source.sourceId} value={source.sourceId}>
+                  {source.label} ({source.lookupTableName})
+                </option>
+              ))}
+            </select>
+            <span style={hintStyle}>This source provides CMDB app metadata columns used in DQL joins.</span>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Dynatrace Application ID Field Path</label>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.dynatraceApplicationIdFieldPath}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("dynatraceApplicationIdFieldPath", event.target.value)}
+              placeholder="example: dt.cost.product"
+            />
+            <span style={hintStyle}>User-defined DQL field path used to read Application ID from Dynatrace entities.</span>
+          </div>
+
+          <div>
+            <label style={labelStyle}>CMDB Application ID Column</label>
+            <select
+              style={{ ...inputStyle, fontFamily: "inherit" }}
+              value={state.applicationVariables.cmdbApplicationIdColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbApplicationIdColumn", event.target.value)}
+            >
+              <option value="">Select column...</option>
+              {cmdbIdOptions.map((column) => (
+                <option key={column} value={column}>{column}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>CMDB Application Name Column</label>
+            <select
+              style={{ ...inputStyle, fontFamily: "inherit" }}
+              value={state.applicationVariables.cmdbApplicationNameColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbApplicationNameColumn", event.target.value)}
+            >
+              <option value="">Select column...</option>
+              {cmdbNameOptions.map((column) => (
+                <option key={column} value={column}>{column}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>CMDB Owner Column</label>
+            <select
+              style={{ ...inputStyle, fontFamily: "inherit" }}
+              value={state.applicationVariables.cmdbOwnerColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbOwnerColumn", event.target.value)}
+            >
+              <option value="">Select column...</option>
+              {cmdbOwnerOptions.map((column) => (
+                <option key={column} value={column}>{column}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>CMDB Tier Column</label>
+            <select
+              style={{ ...inputStyle, fontFamily: "inherit" }}
+              value={state.applicationVariables.cmdbTierColumn}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("cmdbTierColumn", event.target.value)}
+            >
+              <option value="">Select column...</option>
+              {cmdbTierOptions.map((column) => (
+                <option key={column} value={column}>{column}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {selectedColumns.length === 0 && (
+          <Paragraph style={{ marginTop: "10px", color: "#9a6a00", fontSize: "13px" }}>
+            No detected columns yet for the selected CMDB source. Run Load Preview on that source to pre-fill dropdown options.
+          </Paragraph>
+        )}
       </div>
 
       {state.error && (

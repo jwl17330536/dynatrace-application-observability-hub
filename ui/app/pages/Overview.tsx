@@ -169,6 +169,7 @@ function hasApplicationVariableConfig(variables: ApplicationVariableConfig | und
   }
 
   return Boolean(
+    variables.cmdbVariableSourceId?.trim() &&
     variables.dynatraceApplicationIdFieldPath?.trim() &&
       variables.cmdbApplicationIdColumn?.trim() &&
       variables.cmdbApplicationNameColumn?.trim() &&
@@ -366,10 +367,15 @@ function DashboardView({ config }: { config: MappingConfig }) {
   const navigate = useNavigate();
   const defaultSource = config.sources.find((source) => source.sourceId === config.defaultSourceId) || config.sources[0];
   const variables = config.applicationVariables;
+  const cmdbVariableSource =
+    variables?.cmdbVariableSourceId
+      ? config.sources.find((source) => source.sourceId === variables.cmdbVariableSourceId)
+      : undefined;
+  const activeCmdbSource = cmdbVariableSource || defaultSource;
 
-  const hasSource = Boolean(defaultSource);
+  const hasSource = Boolean(activeCmdbSource);
   const hasVariables = hasApplicationVariableConfig(variables);
-  const lookupPath = hasSource ? toLookupPath(defaultSource.lookupTableName) : "";
+  const lookupPath = hasSource ? toLookupPath(activeCmdbSource.lookupTableName) : "";
 
   const totalApplicationsQuery = hasSource && hasVariables ? buildTotalApplicationsQuery(lookupPath, variables) : "";
   const appsInDynatraceQuery = hasSource && hasVariables ? buildAppsInDynatraceQuery(lookupPath, variables) : "";
@@ -419,7 +425,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
             Variable-driven DQL view joining Dynatrace application telemetry to CMDB context from lookup mappings.
           </Paragraph>
           <Paragraph style={{ marginTop: "4px", color: "#777" }}>
-            Primary lookup source: <code>{defaultSource.lookupTableName}</code>
+            CMDB variable source: <code>{activeCmdbSource.lookupTableName}</code>
           </Paragraph>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>

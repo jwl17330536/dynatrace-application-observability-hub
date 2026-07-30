@@ -12,6 +12,7 @@ export interface MappingConfig {
 }
 
 export interface ApplicationVariableConfig {
+  cmdbVariableSourceId: string;
   dynatraceApplicationIdFieldPath: string;
   cmdbApplicationIdColumn: string;
   cmdbApplicationNameColumn: string;
@@ -110,6 +111,7 @@ export interface ValidationResult {
 
 export function getDefaultApplicationVariables(): ApplicationVariableConfig {
   return {
+    cmdbVariableSourceId: "",
     dynatraceApplicationIdFieldPath: "",
     cmdbApplicationIdColumn: "",
     cmdbApplicationNameColumn: "",
@@ -193,6 +195,11 @@ export function validateConfig(config: MappingConfig): ValidationResult {
   if (!vars) {
     errors.push("Application variables are required");
   } else {
+    if (!vars.cmdbVariableSourceId || !vars.cmdbVariableSourceId.trim()) {
+      errors.push("CMDB variable source is required");
+    } else if (!sourceIds.has(vars.cmdbVariableSourceId)) {
+      errors.push(`CMDB variable source '${vars.cmdbVariableSourceId}' is not defined`);
+    }
     if (!vars.dynatraceApplicationIdFieldPath || !vars.dynatraceApplicationIdFieldPath.trim()) {
       errors.push("Dynatrace Application ID field path is required");
     }
