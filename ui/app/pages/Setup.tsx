@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useDql } from "@dynatrace-sdk/react-hooks";
@@ -667,6 +667,14 @@ export const Setup: React.FC = () => {
     }
   };
 
+  const selectedCmdbSource =
+    state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0];
+  const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
+  const cmdbIdOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationIdColumn);
+  const cmdbNameOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationNameColumn);
+  const cmdbOwnerOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbOwnerColumn);
+  const cmdbTierOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbTierColumn);
+
   if (state.isInitializing) {
     return (
       <div style={{ maxWidth: "540px", margin: "80px auto", padding: "0 24px", textAlign: "center" }}>
@@ -675,16 +683,6 @@ export const Setup: React.FC = () => {
       </div>
     );
   }
-
-  const selectedCmdbSource = useMemo(
-    () => state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0],
-    [state.applicationVariables.cmdbVariableSourceId, state.sources]
-  );
-  const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
-  const cmdbIdOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationIdColumn);
-  const cmdbNameOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationNameColumn);
-  const cmdbOwnerOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbOwnerColumn);
-  const cmdbTierOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbTierColumn);
 
   return (
     <div style={{ maxWidth: "980px", margin: "0 auto", padding: "40px 24px" }}>
