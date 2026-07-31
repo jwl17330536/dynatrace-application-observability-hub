@@ -9,6 +9,22 @@ export interface MappingConfig {
   defaultSourceId: string;
   sources: LookupSourceConfig[];
   applicationVariables: ApplicationVariableConfig;
+  featurePacks?: Partial<FeaturePacksConfig>;
+}
+
+export type FeaturePackMode = "native" | "enriched";
+
+export interface FeaturePackConfig {
+  enabled: boolean;
+  mode: FeaturePackMode;
+  lookupSourceId?: string;
+}
+
+export interface FeaturePacksConfig {
+  observabilityEvidence: FeaturePackConfig;
+  problemsAndAlerts: FeaturePackConfig;
+  vulnerabilities: FeaturePackConfig;
+  infrastructureCoverage: FeaturePackConfig;
 }
 
 export interface ApplicationVariableConfig {
@@ -40,6 +56,92 @@ export interface LookupSourceConfig {
 const DOCUMENT_STORE_KEY = "observability-hub-app-config-v1";
 const USE_LOCAL_STORAGE = !sessionStorage.getItem("DOCUMENT_STORE_AVAILABLE");
 
+/** Sentinel for optional CMDB columns the operator chooses to ignore. */
+export const IGNORE_COLUMN_VALUE = "__ignore__";
+
+/** Temporary Hub upload tables → Loop B primary apps lookup. */
+const LEGACY_LOOKUP_TABLE_ALIASES: Record<string, string> = {
+  cmdb_fake: "cmdb_businessapp",
+  cmdb_fake2: "cmdb_businessapp",
+};
+
+const LEGACY_COLUMN_ALIASES: Record<string, string> = {
+  cmdb_ci_key: "application_id",
+  name: "application_name",
+  owned_by: "cmdb_owner",
+  business_criticality: "tier",
+};
+
+function normalizeLookupTableName(name: string): string {
+  const trimmed = (name || "").trim();
+  const withoutPrefix = trimmed.replace(/^\/?lookups\//, "");
+  return LEGACY_LOOKUP_TABLE_ALIASES[withoutPrefix] || withoutPrefix;
+}
+
+function normalizeColumnName(column: string): string {
+  const trimmed = (column || "").trim();
+  if (!trimmed || trimmed === IGNORE_COLUMN_VALUE) {
+    return trimmed;
+  }
+  return LEGACY_COLUMN_ALIASES[trimmed] || trimmed;
+}
+
+/**
+ * Point legacy cmdb_fake sources at /lookups/cmdb_businessapp and remap old export columns.
+ */
+export function migrateLookupConfig(config: MappingConfig): { config: MappingConfig; migrated: boolean } {
+  let migrated = false;
+
+  const sources = config.sources.map((source) => {
+    const originalTable = (source.lookupTableName || "").trim();
+    const nextTable = normalizeLookupTableName(originalTable);
+    if (nextTable !== originalTable) {
+      migrated = true;
+    }
+
+    const fields = source.fields.map((field) => {
+      const nextColumn = normalizeColumnName(field.sourceColumn);
+      if (nextColumn !== field.sourceColumn) {
+        migrated = true;
+        return { ...field, sourceColumn: nextColumn };
+      }
+      return field;
+    });
+
+    return {
+      ...source,
+      lookupTableName: nextTable,
+      fields,
+    };
+  });
+
+  const vars = config.applicationVariables;
+  const nextVars: ApplicationVariableConfig = {
+    ...vars,
+    cmdbApplicationIdColumn: normalizeColumnName(vars.cmdbApplicationIdColumn),
+    cmdbApplicationNameColumn: normalizeColumnName(vars.cmdbApplicationNameColumn),
+    cmdbOwnerColumn: normalizeColumnName(vars.cmdbOwnerColumn),
+    cmdbTierColumn: normalizeColumnName(vars.cmdbTierColumn),
+  };
+  if (
+    nextVars.cmdbApplicationIdColumn !== vars.cmdbApplicationIdColumn ||
+    nextVars.cmdbApplicationNameColumn !== vars.cmdbApplicationNameColumn ||
+    nextVars.cmdbOwnerColumn !== vars.cmdbOwnerColumn ||
+    nextVars.cmdbTierColumn !== vars.cmdbTierColumn
+  ) {
+    migrated = true;
+  }
+
+  return {
+    config: {
+      ...config,
+      sources,
+      applicationVariables: nextVars,
+    },
+    migrated,
+  };
+}
+
 export async function validateDocumentStoreAccess(): Promise<boolean> {
   try {
     const response = await fetch("/platform/storage/resource-store/v1/files/test-key", {
@@ -57,10 +159,25 @@ export async function validateDocumentStoreAccess(): Promise<boolean> {
   }
 }
 
+async function applyLookupMigration(raw: MappingConfig | null): Promise<MappingConfig | null> {
+  if (!raw) {
+    return null;
+  }
+  const { config, migrated } = migrateLookupConfig(raw);
+  if (migrated) {
+    try {
+      await saveConfig(config);
+    } catch (error) {
+      console.warn("Migrated lookup config but failed to persist:", error);
+    }
+  }
+  return config;
+}
+
 export async function fetchConfigFromDocumentStore(): Promise<MappingConfig | null> {
   if (USE_LOCAL_STORAGE) {
     const cached = localStorage.getItem(DOCUMENT_STORE_KEY);
-    return cached ? JSON.parse(cached) : null;
+    return applyLookupMigration(cached ? JSON.parse(cached) : null);
   }
 
   try {
@@ -72,11 +189,11 @@ export async function fetchConfigFromDocumentStore(): Promise<MappingConfig | nu
       throw new Error(`Failed to fetch config: ${response.statusText}`);
     }
     const data = await response.json();
-    return data;
+    return applyLookupMigration(data);
   } catch (error) {
     console.warn("Error fetching from Document Store, falling back to localStorage:", error);
     const cached = localStorage.getItem(DOCUMENT_STORE_KEY);
-    return cached ? JSON.parse(cached) : null;
+    return applyLookupMigration(cached ? JSON.parse(cached) : null);
   }
 }
 
@@ -117,6 +234,50 @@ export function getDefaultApplicationVariables(): ApplicationVariableConfig {
     cmdbApplicationNameColumn: "",
     cmdbOwnerColumn: "",
     cmdbTierColumn: "",
+  };
+}
+
+export function getDefaultFeaturePacks(): FeaturePacksConfig {
+  return {
+    observabilityEvidence: {
+      enabled: true,
+      mode: "native",
+    },
+    problemsAndAlerts: {
+      enabled: true,
+      mode: "native",
+    },
+    vulnerabilities: {
+      enabled: true,
+      mode: "native",
+    },
+    infrastructureCoverage: {
+      enabled: false,
+      mode: "enriched",
+      lookupSourceId: "",
+    },
+  };
+}
+
+export function mergeFeaturePacks(featurePacks?: Partial<FeaturePacksConfig>): FeaturePacksConfig {
+  const defaults = getDefaultFeaturePacks();
+  return {
+    observabilityEvidence: {
+      ...defaults.observabilityEvidence,
+      ...(featurePacks?.observabilityEvidence || {}),
+    },
+    problemsAndAlerts: {
+      ...defaults.problemsAndAlerts,
+      ...(featurePacks?.problemsAndAlerts || {}),
+    },
+    vulnerabilities: {
+      ...defaults.vulnerabilities,
+      ...(featurePacks?.vulnerabilities || {}),
+    },
+    infrastructureCoverage: {
+      ...defaults.infrastructureCoverage,
+      ...(featurePacks?.infrastructureCoverage || {}),
+    },
   };
 }
 
@@ -201,10 +362,7 @@ export function validateConfig(config: MappingConfig): ValidationResult {
       errors.push(`CMDB variable source '${vars.cmdbVariableSourceId}' is not defined`);
     }
     if (!vars.dynatraceApplicationIdFieldPath || !vars.dynatraceApplicationIdFieldPath.trim()) {
-      errors.push("Dynatrace Application ID field path is required");
-    }
-    if (!vars.cmdbApplicationIdColumn || !vars.cmdbApplicationIdColumn.trim()) {
-      errors.push("CMDB Application ID column is required");
+      errors.push("Dynatrace Application ID expression is required");
     }
     if (!vars.cmdbApplicationNameColumn || !vars.cmdbApplicationNameColumn.trim()) {
       errors.push("CMDB Application Name column is required");
@@ -215,10 +373,27 @@ export function validateConfig(config: MappingConfig): ValidationResult {
     if (!vars.cmdbTierColumn || !vars.cmdbTierColumn.trim()) {
       errors.push("CMDB Tier column is required");
     }
+
+    const selectedSource = config.sources.find((source) => source.sourceId === vars.cmdbVariableSourceId);
+    const selectedSourceUnique = selectedSource?.fields.find((field) => field.id === "uniqueApplicationId")?.sourceColumn?.trim();
+    if (!selectedSourceUnique) {
+      errors.push("Selected CMDB variable source must map Unique Application ID in Step 3");
+    }
   }
 
   if (!hasAnyUniqueApplicationIdMapping) {
     errors.push("At least one source must map the Unique Application ID field");
+  }
+
+  const featurePacks = mergeFeaturePacks(config.featurePacks);
+  const packEntries = Object.entries(featurePacks) as Array<[keyof FeaturePacksConfig, FeaturePackConfig]>;
+  for (const [packId, pack] of packEntries) {
+    if (pack.mode !== "native" && pack.mode !== "enriched") {
+      errors.push(`Feature pack '${packId}' has an invalid mode`);
+    }
+    if (pack.mode === "enriched" && pack.lookupSourceId && !sourceIds.has(pack.lookupSourceId)) {
+      errors.push(`Feature pack '${packId}' references unknown lookup source '${pack.lookupSourceId}'`);
+    }
   }
 
   return {

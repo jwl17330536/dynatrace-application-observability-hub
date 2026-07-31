@@ -6,6 +6,7 @@ import { Setup } from "@pages/Setup";
 import { Overview } from "@pages/Overview";
 import { Summary } from "@pages/Summary";
 import { APP_BUILD_VERSION } from "@constants/buildInfo";
+import { theme } from "@utils/themeStyles";
 
 export const App = () => {
   return (
@@ -17,11 +18,11 @@ export const App = () => {
             top: "10px",
             right: "12px",
             zIndex: 1000,
-            border: "1px solid #cfd7eb",
+            border: `1px solid ${theme.border}`,
             borderRadius: "999px",
             padding: "3px 10px",
-            backgroundColor: "#f3f7ff",
-            color: "#2e3a63",
+            backgroundColor: theme.primarySubtle,
+            color: theme.primaryText,
             fontSize: "11px",
             fontWeight: 700,
             letterSpacing: "0.04em",

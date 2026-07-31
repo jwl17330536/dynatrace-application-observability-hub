@@ -4,14 +4,20 @@ import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useDql } from "@dynatrace-sdk/react-hooks";
 import {
   fetchConfigFromDocumentStore,
+  getDefaultFeaturePacks,
   getDefaultApplicationVariables,
+  IGNORE_COLUMN_VALUE,
+  mergeFeaturePacks,
   saveConfig,
   validateConfig,
   type ApplicationVariableConfig,
+  type FeaturePackConfig,
+  type FeaturePacksConfig,
   type LookupSourceConfig,
   type MappingConfig,
   type LookupFieldConfig,
 } from "@utils/documentStore";
+import { theme } from "@utils/themeStyles";
 
 interface PreviewRequest {
   query: string;
@@ -22,6 +28,7 @@ interface LookupUploadState {
   file: File | null;
   headers: string[];
   lookupField: string;
+  uploadTargetName: string;
   overwrite: boolean;
   isUploading: boolean;
   message: string | null;
@@ -32,6 +39,8 @@ interface SetupState {
   sources: LookupSourceConfig[];
   defaultSourceId: string;
   applicationVariables: ApplicationVariableConfig;
+  featurePacks: FeaturePacksConfig;
+  autoFilledUniqueColumnBySource: Record<string, string>;
   detectedColumnsBySource: Record<string, string[]>;
   uploadBySource: Record<string, LookupUploadState>;
   isInitializing: boolean;
@@ -44,10 +53,12 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "9px 12px",
   boxSizing: "border-box",
-  border: "1px solid #ccc",
+  border: `1px solid ${theme.border}`,
   borderRadius: "4px",
   fontSize: "14px",
   fontFamily: "monospace",
+  backgroundColor: theme.surface,
+  color: theme.text,
 };
 
 const labelStyle: React.CSSProperties = {
@@ -55,12 +66,12 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 600,
   marginBottom: "6px",
   fontSize: "13px",
-  color: "#333",
+  color: theme.text,
 };
 
 const hintStyle: React.CSSProperties = {
   fontSize: "12px",
-  color: "#888",
+  color: theme.textMuted,
   marginTop: "4px",
   display: "block",
 };
@@ -133,11 +144,25 @@ function buildColumnOptions(detectedColumns: string[], currentValue: string): st
   return Array.from(dedup).sort((left, right) => left.localeCompare(right));
 }
 
+function getUniqueApplicationIdColumn(source: LookupSourceConfig | undefined): string {
+  if (!source) {
+    return "";
+  }
+  const uniqueField = source.fields.find((field) => field.id === "uniqueApplicationId");
+  return uniqueField?.sourceColumn.trim() || "";
+}
+
+function normalizeOptionalColumnSelection(value: string | undefined): string {
+  const trimmed = (value || "").trim();
+  return trimmed ? trimmed : IGNORE_COLUMN_VALUE;
+}
+
 function createDefaultUploadState(): LookupUploadState {
   return {
     file: null,
     headers: [],
     lookupField: "",
+    uploadTargetName: "",
     overwrite: true,
     isUploading: false,
     message: null,
@@ -189,6 +214,27 @@ function buildCsvParsePattern(headers: string[]): string {
 const DEFAULT_LOOKUP_TABLE_NAME = "cmdb_businessapp";
 const DEFAULT_SOURCE = createSource("Primary Applications", DEFAULT_LOOKUP_TABLE_NAME, true);
 
+type FeaturePackId = keyof FeaturePacksConfig;
+
+const FEATURE_PACK_META: Record<FeaturePackId, { title: string; summary: string }> = {
+  observabilityEvidence: {
+    title: "Standard Pack 1: Observability Evidence",
+    summary: "Signal evidence and quality views using Dynatrace-native telemetry data.",
+  },
+  problemsAndAlerts: {
+    title: "Standard Pack 2: Problems & Alerts",
+    summary: "Active and historical problem rollups from Dynatrace problem and event datasets.",
+  },
+  vulnerabilities: {
+    title: "Standard Pack 3: Vulnerabilities",
+    summary: "Security rollups (critical/high/total) from Dynatrace vulnerability entities.",
+  },
+  infrastructureCoverage: {
+    title: "Feature Pack 1: Infrastructure Coverage",
+    summary: "Expected vs observed host coverage for OneAgent rollout gap analysis.",
+  },
+};
+
 function SourcePreview({
   request,
   source,
@@ -217,20 +263,20 @@ function SourcePreview({
       style={{
         marginTop: "12px",
         padding: "12px",
-        backgroundColor: "#fafafa",
-        border: "1px solid #e5e5e5",
+        backgroundColor: theme.surfaceSubtle,
+        border: `1px solid ${theme.border}`,
         borderRadius: "6px",
       }}
     >
-      <div style={{ fontSize: "12px", color: "#555", marginBottom: "8px", fontWeight: 600 }}>
+      <div style={{ fontSize: "12px", color: theme.textSecondary, marginBottom: "8px", fontWeight: 600 }}>
         Preview Query (limit 1)
       </div>
       <pre
         style={{
           margin: "0 0 10px 0",
           padding: "10px",
-          backgroundColor: "#fff",
-          border: "1px solid #eee",
+          backgroundColor: theme.surface,
+          border: `1px solid ${theme.border}`,
           borderRadius: "4px",
           fontSize: "12px",
           overflowX: "auto",
@@ -239,10 +285,10 @@ function SourcePreview({
         {request.query}
       </pre>
 
-      {isLoading && <div style={{ fontSize: "13px", color: "#666" }}>Loading preview...</div>}
+      {isLoading && <div style={{ fontSize: "13px", color: theme.textSecondary }}>Loading preview...</div>}
 
       {error && (
-        <div style={{ fontSize: "13px", color: "#c0392b" }}>
+        <div style={{ fontSize: "13px", color: theme.criticalText }}>
           Preview error: {typeof error === "string" ? error : String(error)}
         </div>
       )}
@@ -252,9 +298,9 @@ function SourcePreview({
           {configuredColumns.length > 0 && (
             <div style={{ marginBottom: "10px", fontSize: "12px" }}>
               {missingColumns.length === 0 ? (
-                <span style={{ color: "#1f7a1f" }}>All configured columns were found in the preview row.</span>
+                <span style={{ color: theme.successText }}>All configured columns were found in the preview row.</span>
               ) : (
-                <span style={{ color: "#c0392b" }}>
+                <span style={{ color: theme.criticalText }}>
                   Missing columns in preview row: {missingColumns.join(", ")}
                 </span>
               )}
@@ -265,8 +311,8 @@ function SourcePreview({
             style={{
               margin: 0,
               padding: "10px",
-              backgroundColor: "#fff",
-              border: "1px solid #eee",
+              backgroundColor: theme.surface,
+              border: `1px solid ${theme.border}`,
               borderRadius: "4px",
               fontSize: "12px",
               overflowX: "auto",
@@ -280,6 +326,22 @@ function SourcePreview({
   );
 }
 
+function getFeaturePackReadiness(packId: FeaturePackId, pack: FeaturePackConfig): string {
+  if (!pack.enabled) {
+    return "Disabled";
+  }
+  if (pack.mode === "native") {
+    if (packId === "infrastructureCoverage") {
+      return "Infrastructure coverage uses expected inventory. Switch to enriched mode and select lookup source.";
+    }
+    return "Available now (Dynatrace-native mode)";
+  }
+  if (!pack.lookupSourceId?.trim()) {
+    return "Requires optional lookup source selection";
+  }
+  return "Ready with CMDB enrichment";
+}
+
 export const Setup: React.FC = () => {
   const navigate = useNavigate();
   const [previewRunCounter, setPreviewRunCounter] = useState(0);
@@ -290,6 +352,8 @@ export const Setup: React.FC = () => {
       ...getDefaultApplicationVariables(),
       cmdbVariableSourceId: DEFAULT_SOURCE.sourceId,
     },
+    featurePacks: getDefaultFeaturePacks(),
+    autoFilledUniqueColumnBySource: {},
     detectedColumnsBySource: {},
     uploadBySource: {},
     isInitializing: true,
@@ -320,9 +384,18 @@ export const Setup: React.FC = () => {
             ...prev,
             sources: existingSources,
             defaultSourceId: existingDefaultSource,
+            featurePacks: mergeFeaturePacks(existing.featurePacks),
+            autoFilledUniqueColumnBySource: {},
             applicationVariables: {
               ...mergedVariables,
               cmdbVariableSourceId: mergedVariables.cmdbVariableSourceId || existingDefaultSource,
+              cmdbOwnerColumn: normalizeOptionalColumnSelection(mergedVariables.cmdbOwnerColumn),
+              cmdbTierColumn: normalizeOptionalColumnSelection(mergedVariables.cmdbTierColumn),
+              cmdbApplicationIdColumn:
+                getUniqueApplicationIdColumn(
+                  existingSources.find((source) => source.sourceId === (mergedVariables.cmdbVariableSourceId || existingDefaultSource)) ||
+                    existingSources[0]
+                ) || mergedVariables.cmdbApplicationIdColumn,
             },
             uploadBySource: {},
             isInitializing: false,
@@ -360,19 +433,75 @@ export const Setup: React.FC = () => {
   };
 
   const setField = (sourceId: string, fieldId: string, patch: Partial<LookupFieldConfig>) => {
-    setSource(sourceId, (source) => ({
-      ...source,
-      fields: source.fields.map((field) => (field.id === fieldId ? { ...field, ...patch } : field)),
-    }));
+    setState((prev) => {
+      const nextSources = prev.sources.map((source) =>
+        source.sourceId === sourceId
+          ? {
+              ...source,
+              fields: source.fields.map((field) => (field.id === fieldId ? { ...field, ...patch } : field)),
+            }
+          : source
+      );
+      const selectedSource = nextSources.find((source) => source.sourceId === prev.applicationVariables.cmdbVariableSourceId) || nextSources[0];
+      const nextAutoFilledUniqueColumnBySource = { ...prev.autoFilledUniqueColumnBySource };
+
+      if (fieldId === "uniqueApplicationId" && typeof patch.sourceColumn === "string") {
+        const priorAutoFilled = prev.autoFilledUniqueColumnBySource[sourceId] || "";
+        const nextValue = patch.sourceColumn.trim();
+        if (nextValue !== priorAutoFilled) {
+          delete nextAutoFilledUniqueColumnBySource[sourceId];
+        }
+      }
+
+      return {
+        ...prev,
+        error: null,
+        sources: nextSources,
+        autoFilledUniqueColumnBySource: nextAutoFilledUniqueColumnBySource,
+        applicationVariables: {
+          ...prev.applicationVariables,
+          cmdbApplicationIdColumn: getUniqueApplicationIdColumn(selectedSource),
+        },
+      };
+    });
   };
 
   const setApplicationVariable = (key: keyof ApplicationVariableConfig, value: string) => {
+    if (key === "cmdbVariableSourceId") {
+      setState((prev) => {
+        const selectedSource = prev.sources.find((source) => source.sourceId === value) || prev.sources[0];
+        return {
+          ...prev,
+          error: null,
+          applicationVariables: {
+            ...prev.applicationVariables,
+            cmdbVariableSourceId: value,
+            cmdbApplicationIdColumn: getUniqueApplicationIdColumn(selectedSource),
+          },
+        };
+      });
+      return;
+    }
+
     setState((prev) => ({
       ...prev,
       error: null,
       applicationVariables: {
         ...prev.applicationVariables,
         [key]: value,
+      },
+    }));
+  };
+
+  const setFeaturePack = (packId: FeaturePackId, patch: Partial<FeaturePackConfig>) => {
+    setState((prev) => ({
+      ...prev,
+      featurePacks: {
+        ...prev.featurePacks,
+        [packId]: {
+          ...prev.featurePacks[packId],
+          ...patch,
+        },
       },
     }));
   };
@@ -409,11 +538,20 @@ export const Setup: React.FC = () => {
       delete nextPreviewBySource[sourceId];
       const nextDetectedColumnsBySource = { ...prev.detectedColumnsBySource };
       delete nextDetectedColumnsBySource[sourceId];
+      const nextAutoFilledUniqueColumnBySource = { ...prev.autoFilledUniqueColumnBySource };
+      delete nextAutoFilledUniqueColumnBySource[sourceId];
 
       const nextVariables = {
         ...prev.applicationVariables,
         cmdbVariableSourceId:
           prev.applicationVariables.cmdbVariableSourceId === sourceId ? nextSources[0].sourceId : prev.applicationVariables.cmdbVariableSourceId,
+        cmdbApplicationIdColumn: getUniqueApplicationIdColumn(
+          nextSources.find(
+            (source) =>
+              source.sourceId ===
+              (prev.applicationVariables.cmdbVariableSourceId === sourceId ? nextSources[0].sourceId : prev.applicationVariables.cmdbVariableSourceId)
+          ) || nextSources[0]
+        ),
       };
 
       return {
@@ -422,6 +560,7 @@ export const Setup: React.FC = () => {
         sources: nextSources,
         defaultSourceId: nextDefault,
         applicationVariables: nextVariables,
+        autoFilledUniqueColumnBySource: nextAutoFilledUniqueColumnBySource,
         detectedColumnsBySource: nextDetectedColumnsBySource,
         uploadBySource: Object.fromEntries(Object.entries(prev.uploadBySource).filter(([key]) => key !== sourceId)),
         previewBySource: nextPreviewBySource,
@@ -484,11 +623,16 @@ export const Setup: React.FC = () => {
     setState((prev) => ({ ...prev, isSaving: true, error: null }));
 
     try {
+      const derivedIdColumn = getUniqueApplicationIdColumn(selectedCmdbSource);
       const config: MappingConfig = {
         mode: "lookup",
         defaultSourceId: state.defaultSourceId,
         sources: state.sources,
-        applicationVariables: state.applicationVariables,
+        featurePacks: state.featurePacks,
+        applicationVariables: {
+          ...state.applicationVariables,
+          cmdbApplicationIdColumn: derivedIdColumn,
+        },
       };
 
       const validation = validateConfig(config);
@@ -518,7 +662,10 @@ export const Setup: React.FC = () => {
       applicationVariables: {
         ...getDefaultApplicationVariables(),
         cmdbVariableSourceId: source.sourceId,
+        cmdbApplicationIdColumn: getUniqueApplicationIdColumn(source),
       },
+      featurePacks: getDefaultFeaturePacks(),
+      autoFilledUniqueColumnBySource: {},
       detectedColumnsBySource: {},
       uploadBySource: {},
       isSaving: false,
@@ -541,9 +688,63 @@ export const Setup: React.FC = () => {
     }));
   };
 
-  const handleLookupFileSelect = async (sourceId: string, file: File | null) => {
+  const maybeAutofillUniqueApplicationColumn = (sourceId: string, candidateColumn: string) => {
+    const trimmedCandidate = candidateColumn.trim();
+    if (!trimmedCandidate) {
+      return;
+    }
+
+    setState((prev) => {
+      const nextSources = prev.sources.map((source) => {
+        if (source.sourceId !== sourceId) {
+          return source;
+        }
+
+        const priorAutoFilled = prev.autoFilledUniqueColumnBySource[sourceId] || "";
+
+        return {
+          ...source,
+          fields: source.fields.map((field) => {
+            if (field.id !== "uniqueApplicationId") {
+              return field;
+            }
+            const currentValue = field.sourceColumn.trim();
+            const canAutoFill = !currentValue || currentValue === priorAutoFilled;
+            if (!canAutoFill) {
+              return field;
+            }
+            return {
+              ...field,
+              sourceColumn: trimmedCandidate,
+            };
+          }),
+        };
+      });
+
+      const selectedSource =
+        nextSources.find((source) => source.sourceId === prev.applicationVariables.cmdbVariableSourceId) || nextSources[0];
+
+      return {
+        ...prev,
+        sources: nextSources,
+        autoFilledUniqueColumnBySource: {
+          ...prev.autoFilledUniqueColumnBySource,
+          [sourceId]: trimmedCandidate,
+        },
+        applicationVariables: {
+          ...prev.applicationVariables,
+          cmdbApplicationIdColumn: getUniqueApplicationIdColumn(selectedSource),
+        },
+      };
+    });
+  };
+
+  const handleLookupFileSelect = async (source: LookupSourceConfig, file: File | null) => {
     if (!file) {
-      setUploadState(sourceId, createDefaultUploadState());
+      setUploadState(source.sourceId, {
+        ...createDefaultUploadState(),
+        uploadTargetName: source.lookupTableName,
+      });
       return;
     }
 
@@ -553,10 +754,11 @@ export const Setup: React.FC = () => {
       const headers = parseCsvHeaderLine(firstLine);
 
       if (!headers.length) {
-        setUploadState(sourceId, {
+        setUploadState(source.sourceId, {
           file,
           headers: [],
           lookupField: "",
+          uploadTargetName: source.lookupTableName,
           error: "Could not detect CSV header row. Ensure the first row contains column names.",
           message: null,
         });
@@ -565,28 +767,33 @@ export const Setup: React.FC = () => {
 
       const invalidHeaders = headers.filter((header) => !isValidDplFieldName(header));
       if (invalidHeaders.length > 0) {
-        setUploadState(sourceId, {
+        setUploadState(source.sourceId, {
           file,
           headers,
           lookupField: "",
+          uploadTargetName: source.lookupTableName,
           error: `Invalid header names for lookup parsing: ${invalidHeaders.join(", ")}. Use letters, numbers, and underscores only.`,
           message: null,
         });
         return;
       }
 
-      setUploadState(sourceId, {
+      const defaultLookupKey = headers[0];
+      setUploadState(source.sourceId, {
         file,
         headers,
-        lookupField: headers[0],
+        lookupField: defaultLookupKey,
+        uploadTargetName: source.lookupTableName,
         error: null,
         message: null,
       });
+      maybeAutofillUniqueApplicationColumn(source.sourceId, defaultLookupKey);
     } catch (err) {
-      setUploadState(sourceId, {
+      setUploadState(source.sourceId, {
         file,
         headers: [],
         lookupField: "",
+        uploadTargetName: source.lookupTableName,
         error: `Failed to read file: ${err}`,
         message: null,
       });
@@ -611,9 +818,10 @@ export const Setup: React.FC = () => {
     setUploadState(source.sourceId, { isUploading: true, error: null, message: null });
 
     try {
+      const targetLookupName = upload.uploadTargetName.trim() || source.lookupTableName;
       const requestPayload = {
-        filePath: toLookupPath(source.lookupTableName),
-        displayName: source.label || source.lookupTableName,
+        filePath: toLookupPath(targetLookupName),
+        displayName: source.label || targetLookupName,
         description: "Uploaded from Application Observability Hub",
         lookupField: upload.lookupField,
         parsePattern: buildCsvParsePattern(upload.headers),
@@ -626,7 +834,7 @@ export const Setup: React.FC = () => {
 
       const form = new FormData();
       form.append("request", new Blob([JSON.stringify(requestPayload)], { type: "application/json" }));
-      form.append("content", upload.file, source.lookupTableName);
+  form.append("content", upload.file, targetLookupName);
 
       const response = await fetch("/platform/storage/resource-store/v1/files/tabular/lookup:upload", {
         method: "POST",
@@ -657,7 +865,15 @@ export const Setup: React.FC = () => {
         error: null,
       });
 
-      runPreview(source);
+      setSource(source.sourceId, (current) => ({
+        ...current,
+        lookupTableName: targetLookupName,
+      }));
+
+      runPreview({
+        ...source,
+        lookupTableName: targetLookupName,
+      });
     } catch (err) {
       setUploadState(source.sourceId, {
         isUploading: false,
@@ -669,17 +885,19 @@ export const Setup: React.FC = () => {
 
   const selectedCmdbSource =
     state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0];
+  const derivedCmdbIdColumn = getUniqueApplicationIdColumn(selectedCmdbSource);
   const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
-  const cmdbIdOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationIdColumn);
   const cmdbNameOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationNameColumn);
-  const cmdbOwnerOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbOwnerColumn);
-  const cmdbTierOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbTierColumn);
+  const cmdbOwnerCurrent = state.applicationVariables.cmdbOwnerColumn === IGNORE_COLUMN_VALUE ? "" : state.applicationVariables.cmdbOwnerColumn;
+  const cmdbTierCurrent = state.applicationVariables.cmdbTierColumn === IGNORE_COLUMN_VALUE ? "" : state.applicationVariables.cmdbTierColumn;
+  const cmdbOwnerOptions = buildColumnOptions(selectedColumns, cmdbOwnerCurrent);
+  const cmdbTierOptions = buildColumnOptions(selectedColumns, cmdbTierCurrent);
 
   if (state.isInitializing) {
     return (
       <div style={{ maxWidth: "540px", margin: "80px auto", padding: "0 24px", textAlign: "center" }}>
         <Heading level={1}>Loading Configuration</Heading>
-        <Paragraph style={{ marginTop: "12px", color: "#555" }}>Restoring your last saved lookup setup...</Paragraph>
+        <Paragraph style={{ marginTop: "12px", color: theme.textSecondary }}>Restoring your last saved lookup setup...</Paragraph>
       </div>
     );
   }
@@ -687,7 +905,7 @@ export const Setup: React.FC = () => {
   return (
     <div style={{ maxWidth: "980px", margin: "0 auto", padding: "40px 24px" }}>
       <Heading level={1}>Application Observability Hub</Heading>
-      <Paragraph style={{ marginTop: "8px", color: "#555" }}>
+      <Paragraph style={{ marginTop: "8px", color: theme.textSecondary }}>
         Follow this order: upload lookup CSV (optional), configure source details, map fields, then set join variables.
         The Unique Application ID mapping is required only once across all sources.
       </Paragraph>
@@ -700,7 +918,7 @@ export const Setup: React.FC = () => {
 
       <div style={{ marginTop: "24px", display: "grid", gap: "18px" }}>
         {state.sources.map((source, index) => (
-          <div key={source.sourceId} style={{ border: "1px solid #e0e0e0", borderRadius: "6px", padding: "20px" }}>
+          <div key={source.sourceId} style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
               <Heading level={2} style={{ margin: 0 }}>Source {index + 1}</Heading>
               <Button
@@ -717,8 +935,8 @@ export const Setup: React.FC = () => {
               {(() => {
                 const upload = state.uploadBySource[source.sourceId] || createDefaultUploadState();
                 return (
-                  <div style={{ border: "1px solid #ececec", borderRadius: "6px", padding: "12px" }}>
-                    <Paragraph style={{ margin: "0 0 10px 0", color: "#666", fontSize: "13px" }}>
+                  <div style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "12px" }}>
+                    <Paragraph style={{ margin: "0 0 10px 0", color: theme.textSecondary, fontSize: "13px" }}>
                       Skip this step if your lookup table is already populated by workflows or automation.
                     </Paragraph>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "end" }}>
@@ -728,7 +946,7 @@ export const Setup: React.FC = () => {
                           type="file"
                           accept=".csv,text/csv"
                           disabled={state.isSaving || upload.isUploading}
-                          onChange={(event) => handleLookupFileSelect(source.sourceId, event.target.files?.[0] || null)}
+                          onChange={(event) => handleLookupFileSelect(source, event.target.files?.[0] || null)}
                         />
                       </div>
                       <div>
@@ -737,7 +955,11 @@ export const Setup: React.FC = () => {
                           style={{ ...inputStyle, fontFamily: "inherit" }}
                           value={upload.lookupField}
                           disabled={state.isSaving || upload.isUploading || upload.headers.length === 0}
-                          onChange={(event) => setUploadState(source.sourceId, { lookupField: event.target.value })}
+                          onChange={(event) => {
+                            const lookupField = event.target.value;
+                            setUploadState(source.sourceId, { lookupField });
+                            maybeAutofillUniqueApplicationColumn(source.sourceId, lookupField);
+                          }}
                         >
                           <option value="">Select key column...</option>
                           {upload.headers.map((header) => (
@@ -745,6 +967,21 @@ export const Setup: React.FC = () => {
                           ))}
                         </select>
                       </div>
+                    </div>
+
+                    <div style={{ marginTop: "8px" }}>
+                      <label style={labelStyle}>Upload Target Lookup Name</label>
+                      <input
+                        style={inputStyle}
+                        value={upload.uploadTargetName || source.lookupTableName}
+                        disabled={state.isSaving || upload.isUploading}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setUploadState(source.sourceId, { uploadTargetName: nextValue });
+                        }}
+                        placeholder="cmdb_businessapp"
+                      />
+                      <span style={hintStyle}>This lookup target is used for CSV upload and saved as the source table name.</span>
                     </div>
 
                     <div style={{ marginTop: "8px" }}>
@@ -767,14 +1004,16 @@ export const Setup: React.FC = () => {
                       >
                         {upload.isUploading ? "Uploading..." : "Upload to Lookup"}
                       </Button>
-                      <span style={{ fontSize: "12px", color: "#666" }}>Target: {toLookupPath(source.lookupTableName)}</span>
+                      <span style={{ fontSize: "12px", color: theme.textSecondary }}>
+                        Target: {toLookupPath((upload.uploadTargetName || source.lookupTableName).trim() || source.lookupTableName)}
+                      </span>
                     </div>
 
                     {upload.error && (
-                      <div style={{ marginTop: "8px", fontSize: "12px", color: "#c0392b" }}>{upload.error}</div>
+                      <div style={{ marginTop: "8px", fontSize: "12px", color: theme.criticalText }}>{upload.error}</div>
                     )}
                     {upload.message && (
-                      <div style={{ marginTop: "8px", fontSize: "12px", color: "#1f7a1f" }}>{upload.message}</div>
+                      <div style={{ marginTop: "8px", fontSize: "12px", color: theme.successText }}>{upload.message}</div>
                     )}
                   </div>
                 );
@@ -823,7 +1062,7 @@ export const Setup: React.FC = () => {
               <Heading level={3} style={{ marginTop: 0, marginBottom: "10px" }}>Step 3: Field Mappings and Preview</Heading>
               <div style={{ display: "grid", gap: "10px" }}>
                 {source.fields.map((field) => (
-                  <div key={field.id} style={{ border: "1px solid #eee", borderRadius: "6px", padding: "12px" }}>
+                  <div key={field.id} style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "12px" }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto", gap: "10px", alignItems: "end" }}>
                       <div>
                         <label style={labelStyle}>Field Label</label>
@@ -900,9 +1139,9 @@ export const Setup: React.FC = () => {
         ))}
       </div>
 
-      <div style={{ marginTop: "20px", border: "1px solid #e0e0e0", borderRadius: "6px", padding: "18px" }}>
+      <div style={{ marginTop: "20px", border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "18px" }}>
         <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 4: Application Join Variables</Heading>
-        <Paragraph style={{ margin: "0 0 14px 0", color: "#666" }}>
+        <Paragraph style={{ margin: "0 0 14px 0", color: theme.textSecondary }}>
           Choose the CMDB source first, run Load Preview for that source, then map join variables from detected columns.
         </Paragraph>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
@@ -924,30 +1163,26 @@ export const Setup: React.FC = () => {
           </div>
 
           <div>
-            <label style={labelStyle}>Dynatrace Application ID Field Path</label>
+            <label style={labelStyle}>Dynatrace Application ID Expression</label>
             <input
               style={inputStyle}
               value={state.applicationVariables.dynatraceApplicationIdFieldPath}
               disabled={state.isSaving}
               onChange={(event) => setApplicationVariable("dynatraceApplicationIdFieldPath", event.target.value)}
-              placeholder="example: dt.cost.product"
+              placeholder="example: dt.cost.product or another DQL expression"
             />
-            <span style={hintStyle}>User-defined DQL field path used to read Application ID from Dynatrace entities.</span>
+            <span style={hintStyle}>Use a DQL expression that resolves the Application ID. For host-tag setups, dt.cost.product is supported.</span>
           </div>
 
           <div>
-            <label style={labelStyle}>CMDB Application ID Column</label>
-            <select
-              style={{ ...inputStyle, fontFamily: "inherit" }}
-              value={state.applicationVariables.cmdbApplicationIdColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbApplicationIdColumn", event.target.value)}
-            >
-              <option value="">Select column...</option>
-              {cmdbIdOptions.map((column) => (
-                <option key={column} value={column}>{column}</option>
-              ))}
-            </select>
+            <label style={labelStyle}>CMDB Application ID Column (from Step 3)</label>
+            <input
+              style={inputStyle}
+              value={derivedCmdbIdColumn}
+              disabled
+              placeholder="Map Unique Application ID in Step 3"
+            />
+            <span style={hintStyle}>This value is automatically derived from Unique Application ID for the selected source.</span>
           </div>
 
           <div>
@@ -973,11 +1208,12 @@ export const Setup: React.FC = () => {
               disabled={state.isSaving}
               onChange={(event) => setApplicationVariable("cmdbOwnerColumn", event.target.value)}
             >
-              <option value="">Select column...</option>
+              <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
               {cmdbOwnerOptions.map((column) => (
                 <option key={column} value={column}>{column}</option>
               ))}
             </select>
+            <span style={hintStyle}>Ignored by default. When ignored, Owner is hidden on the Application Dashboard.</span>
           </div>
 
           <div>
@@ -988,23 +1224,91 @@ export const Setup: React.FC = () => {
               disabled={state.isSaving}
               onChange={(event) => setApplicationVariable("cmdbTierColumn", event.target.value)}
             >
-              <option value="">Select column...</option>
+              <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
               {cmdbTierOptions.map((column) => (
                 <option key={column} value={column}>{column}</option>
               ))}
             </select>
+            <span style={hintStyle}>Ignored by default. When ignored, Tier is hidden on the Application Dashboard.</span>
           </div>
         </div>
         {selectedColumns.length === 0 && (
-          <Paragraph style={{ marginTop: "10px", color: "#9a6a00", fontSize: "13px" }}>
+          <Paragraph style={{ marginTop: "10px", color: theme.warningEmphasized, fontSize: "13px" }}>
             No detected columns yet for the selected CMDB source. Run Load Preview on that source to pre-fill dropdown options.
           </Paragraph>
         )}
       </div>
 
+      <div style={{ marginTop: "20px", border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "18px" }}>
+        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 5: Telemetry Selection</Heading>
+        <Paragraph style={{ margin: "0 0 14px 0", color: theme.textSecondary }}>
+          Enable packs independently. Standard packs are Dynatrace-native. Feature packs add CMDB-backed context.
+        </Paragraph>
+        <div style={{ display: "grid", gap: "12px" }}>
+          {(Object.keys(FEATURE_PACK_META) as FeaturePackId[]).map((packId) => {
+            const pack = state.featurePacks[packId];
+            const meta = FEATURE_PACK_META[packId];
+            const readiness = getFeaturePackReadiness(packId, pack);
+            return (
+              <div key={packId} style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: theme.text }}>{meta.title}</div>
+                    <div style={{ fontSize: "12px", color: theme.textSecondary, marginTop: "4px" }}>{meta.summary}</div>
+                  </div>
+                  <label style={{ ...labelStyle, marginBottom: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      type="checkbox"
+                      checked={pack.enabled}
+                      disabled={state.isSaving}
+                      onChange={(event) => setFeaturePack(packId, { enabled: event.target.checked })}
+                    />
+                    Enable
+                  </label>
+                </div>
+
+                <div style={{ marginTop: "10px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <div>
+                    <label style={labelStyle}>Mode</label>
+                    <select
+                      style={{ ...inputStyle, fontFamily: "inherit" }}
+                      value={pack.mode}
+                      disabled={state.isSaving || packId === "infrastructureCoverage"}
+                      onChange={(event) => setFeaturePack(packId, { mode: event.target.value as "native" | "enriched" })}
+                    >
+                      <option value="native">Dynatrace-native</option>
+                      <option value="enriched">CMDB-enriched</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>Optional Lookup Source</label>
+                    <select
+                      style={{ ...inputStyle, fontFamily: "inherit" }}
+                      value={pack.lookupSourceId || ""}
+                      disabled={state.isSaving || !pack.enabled || pack.mode !== "enriched"}
+                      onChange={(event) => setFeaturePack(packId, { lookupSourceId: event.target.value })}
+                    >
+                      <option value="">None selected</option>
+                      {state.sources.map((source) => (
+                        <option key={source.sourceId} value={source.sourceId}>
+                          {source.label} ({source.lookupTableName})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "8px", fontSize: "12px", color: theme.textSecondary }}>Readiness: {readiness}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {state.error && (
-        <div style={{ marginTop: "16px", padding: "12px", backgroundColor: "#fff0f0", border: "1px solid #f5c6c6", borderRadius: "4px" }}>
-          <span style={{ color: "#c0392b", fontSize: "14px" }}>{state.error}</span>
+        <div style={{ marginTop: "16px", padding: "12px", backgroundColor: theme.criticalBg, border: `1px solid ${theme.criticalBorder}`, borderRadius: "4px" }}>
+          <span style={{ color: theme.criticalText, fontSize: "14px" }}>{state.error}</span>
         </div>
       )}
 

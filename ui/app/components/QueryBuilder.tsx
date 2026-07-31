@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { theme } from "@utils/themeStyles";
 
 interface QueryBuilderProps {
   query: string;
@@ -18,7 +19,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({ query }) => {
   };
 
   return (
-    <div style={{ padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
+    <div style={{ padding: "10px", backgroundColor: theme.surfaceSubtle, borderRadius: "4px" }}>
       <div style={{ marginBottom: "10px" }}>
         <strong>Query:</strong>
         <button
@@ -26,7 +27,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({ query }) => {
           style={{
             marginLeft: "10px",
             padding: "5px 10px",
-            backgroundColor: "#2196F3",
+            backgroundColor: theme.primary,
             color: "white",
             border: "none",
             borderRadius: "4px",

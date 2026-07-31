@@ -1,4 +1,5 @@
 import React from "react";
+import { theme } from "@utils/themeStyles";
 
 interface StatusPillProps {
   tone: "success" | "warning" | "critical";
@@ -10,9 +11,9 @@ interface StatusPillProps {
  */
 export const StatusPill: React.FC<StatusPillProps> = ({ tone, label }) => {
   const colors = {
-    success: { bg: "#4CAF50", text: "white" },
-    warning: { bg: "#FFC107", text: "black" },
-    critical: { bg: "#f44336", text: "white" },
+    success: { bg: theme.successText, text: theme.textOnAccent },
+    warning: { bg: theme.warningEmphasized, text: theme.text },
+    critical: { bg: theme.criticalText, text: theme.textOnAccent },
   };
 
   const style = colors[tone];

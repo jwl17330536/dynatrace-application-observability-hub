@@ -2,7 +2,7 @@
   "app": {
     "id": "my.application.observability.hub",
     "name": "Application Observability Hub",
-    "version": "0.1.16",
+    "version": "0.1.53",
     "description": "Multi-tenant hub app for application observability with flexible data sources",
     "scopes": [
       {
@@ -20,6 +20,26 @@
       {
         "name": "storage:files:write",
         "comment": "Write configuration to Document Store"
+      },
+      {
+        "name": "storage:entities:read",
+        "comment": "Read entity data for host-based Application ID expressions"
+      },
+      {
+        "name": "storage:buckets:read",
+        "comment": "Required to read Grail buckets backing spans/logs/metrics"
+      },
+      {
+        "name": "storage:spans:read",
+        "comment": "Read span/trace telemetry for Pack 1 evidence and coverage"
+      },
+      {
+        "name": "storage:logs:read",
+        "comment": "Read log telemetry for Pack 1 evidence"
+      },
+      {
+        "name": "storage:metrics:read",
+        "comment": "Read metrics/timeseries for Pack 1 log-status fallbacks"
       }
     ]
   },
