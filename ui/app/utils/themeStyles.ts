@@ -26,4 +26,22 @@ export const theme = {
   accentBg: "var(--dt-colors-theme-primary-20)",
 } as const;
 
+/**
+ * Dashboard density (v0.1.60) — Flow Analyst–like compact tables.
+ * Visual only; does not change queries or widget behavior.
+ */
+export const density = {
+  pagePadding: "20px",
+  pageMaxWidth: "1600px",
+  cardPadding: "12px",
+  cardRadius: "6px",
+  cardGap: "10px",
+  widgetTitleSize: "15px",
+  kpiValueSize: "28px",
+  tableFontSize: "12px",
+  thPadding: "6px 8px",
+  tdPadding: "6px 8px",
+  thFontSize: "11px",
+} as const;
+
 export type ThemeTokens = typeof theme;

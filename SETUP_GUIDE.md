@@ -203,6 +203,22 @@ Hub automatically tests the lookups:
 
 ---
 
+## In-app Setup: Join variables (Step 3)
+
+Required join keys:
+
+1. **Unique Application ID** mapped in Step 2 (lookup column)
+2. **Dynatrace Application ID expression** (for example `dt.cost.product`)
+
+Optional enrichment (Name, Owner, Tier) may be set to **Ignore**. Dropdown options for those fields are filled from:
+
+- **Load Preview** on the selected CMDB source (a non-empty sample row), and/or
+- **CSV headers** when using Step 1A upload
+
+If you only see Ignore, run Load Preview again on the source selected under **CMDB Variable Source**. Empty preview results no longer clear previously detected columns (v0.1.57+).
+
+---
+
 ## Troubleshooting
 
 ### "Lookup table not found"

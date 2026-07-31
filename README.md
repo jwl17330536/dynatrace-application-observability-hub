@@ -26,12 +26,31 @@ The app saves a lookup-only configuration with:
 
 1. Home routes to Setup when no config exists.
 2. Setup lets you:
-   - Add/remove sources
-   - Select default source
-   - Add/remove fields per source
-   - Keep only Unique Application ID as required
-3. Summary shows cards for all configured sources.
-4. Overview renders the selected source with dynamic columns and query projection.
+   - Connect a lookup (upload CSV **or** use an existing table) and Load Preview
+   - Map Unique Application ID (required join key)
+   - Set join variables (Dynatrace Application ID expression + optional name/owner/tier)
+   - Enable telemetry packs independently
+3. Summary offers a primary Open Application Dashboard CTA.
+4. Overview (Application Dashboard) shows KPIs and pack widgets across tabs: **Summary**, **Status**, **Signal**, **Alerts**, **Security**, **Inventory** (`?tab=` in the URL).
+
+## Changelog
+
+### v0.1.61
+- **HubDataTable (Inventory only):** Application Inventory gains Flow Analyst–style client-side sort, per-column filter, column picker, and drag-resize. Prefs in `localStorage` key `aoh.hubDataTable.inventory.v1` (Reset table prefs clears them). Other tables unchanged. Rollback: set `USE_HUB_DATA_TABLE_INVENTORY = false` in `Overview.tsx`.
+
+### v0.1.60
+- **Dashboard density:** Tighter card padding, ~12px table text, smaller KPI figures, wider canvas (`density` tokens in `themeStyles.ts`). Visual only — queries and tab structure unchanged.
+
+### v0.1.59
+- **Application Dashboard tabs:** Summary, Status, Signal, Alerts, Security, Inventory. Same widgets and queries as before; URL `?tab=` keeps the selected section (default Summary). Disabled packs show a short enable-in-Setup empty state on their tab.
+
+### v0.1.58
+- **Application Dashboard:** Widget titles use operator language first (e.g. Signal Quality Summary). Pack provenance is a muted secondary label with hover tooltip (`Standard Pack N`), not the primary heading.
+
+### v0.1.57
+- **Setup Step 3:** Optional Name / Owner / Tier dropdowns no longer collapse to Ignore-only after preview.
+  Column options come from Load Preview (non-empty rows only; empty results never wipe prior detections) and from CSV headers when using path 1A.
+  Ignore remains a valid choice for optional enrichment.
 
 ## Development
 

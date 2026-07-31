@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
 import { useDql } from "@dynatrace-sdk/react-hooks";
@@ -275,16 +275,22 @@ function SourcePreview({
   const { data, isLoading, error } = useDql({ query: request.query });
   const firstRecord = (data?.records?.[0] || {}) as Record<string, unknown>;
   const availableColumns = Object.keys(firstRecord);
+  // Stable key so we do not re-fire on every render from a new array identity.
+  const availableColumnsKey = availableColumns.slice().sort().join("\0");
   const configuredColumns = source.fields
     .map((field) => sanitizeColumnName(field.sourceColumn))
     .filter((name): name is string => Boolean(name));
   const missingColumns = configuredColumns.filter((name) => !availableColumns.includes(name));
 
   useEffect(() => {
-    if (!isLoading && !error) {
-      onColumnsDetected(source.sourceId, availableColumns);
+    // Never push [] — an empty write wiped Step 3 optional column dropdowns (Ignore-only).
+    if (isLoading || error || availableColumns.length === 0) {
+      return;
     }
-  }, [availableColumns, error, isLoading, onColumnsDetected, source.sourceId]);
+    onColumnsDetected(source.sourceId, availableColumns);
+    // availableColumnsKey stands in for availableColumns content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: key encodes column set
+  }, [availableColumnsKey, error, isLoading, onColumnsDetected, source.sourceId]);
 
   return (
     <div
@@ -542,15 +548,27 @@ export const Setup: React.FC = () => {
     }));
   };
 
-  const setDetectedColumns = (sourceId: string, columns: string[]) => {
-    setState((prev) => ({
-      ...prev,
-      detectedColumnsBySource: {
-        ...prev.detectedColumnsBySource,
-        [sourceId]: columns,
-      },
-    }));
-  };
+  const setDetectedColumns = useCallback((sourceId: string, columns: string[]) => {
+    if (!columns.length) {
+      return;
+    }
+    setState((prev) => {
+      const existing = prev.detectedColumnsBySource[sourceId] || [];
+      const merged = Array.from(new Set([...existing, ...columns]));
+      const unchanged =
+        merged.length === existing.length && merged.every((column) => existing.includes(column));
+      if (unchanged) {
+        return prev;
+      }
+      return {
+        ...prev,
+        detectedColumnsBySource: {
+          ...prev.detectedColumnsBySource,
+          [sourceId]: merged.sort((left, right) => left.localeCompare(right)),
+        },
+      };
+    });
+  }, []);
 
   const addSource = () => {
     const index = state.sources.length + 1;
@@ -942,7 +960,15 @@ export const Setup: React.FC = () => {
   const selectedCmdbSource =
     state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0];
   const derivedCmdbIdColumn = getUniqueApplicationIdColumn(selectedCmdbSource);
-  const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
+  // Preview-detected columns plus CSV upload headers (when present) for Step 3 dropdowns.
+  const selectedColumns = useMemo(() => {
+    if (!selectedCmdbSource) {
+      return [] as string[];
+    }
+    const detected = state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [];
+    const uploadHeaders = state.uploadBySource[selectedCmdbSource.sourceId]?.headers || [];
+    return Array.from(new Set([...detected, ...uploadHeaders])).sort((left, right) => left.localeCompare(right));
+  }, [selectedCmdbSource, state.detectedColumnsBySource, state.uploadBySource]);
   const cmdbNameOptions = buildColumnOptions(
     selectedColumns,
     state.applicationVariables.cmdbApplicationNameColumn === IGNORE_COLUMN_VALUE
@@ -1406,7 +1432,8 @@ export const Setup: React.FC = () => {
         </div>
         {selectedColumns.length === 0 && (
           <Paragraph style={{ marginTop: "10px", color: theme.warningEmphasized, fontSize: "13px" }}>
-            No detected columns yet for the selected CMDB source. Run Load Preview on that source to pre-fill dropdown options.
+            No detected columns yet for the selected CMDB source. Run Load Preview (or select a CSV in Step 1A) to
+            pre-fill Name / Owner / Tier dropdown options. Ignore remains valid for optional enrichment.
           </Paragraph>
         )}
       </div>

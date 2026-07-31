@@ -1,10 +1,34 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { Heading, Paragraph, Button } from "@dynatrace/strato-components";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useDql } from "@dynatrace-sdk/react-hooks";
 import { useMappingConfig } from "@hooks/useMappingConfig";
 import { IGNORE_COLUMN_VALUE, mergeFeaturePacks, type MappingConfig, type LookupSourceConfig, type ApplicationVariableConfig, type FeaturePacksConfig } from "@utils/documentStore";
-import { theme } from "@utils/themeStyles";
+import { density, theme } from "@utils/themeStyles";
+import { HubDataTable, type HubColumnDef } from "@components/HubDataTable";
+
+/**
+ * v0.1.61: Application Inventory uses HubDataTable.
+ * Set to false to restore the previous plain <table> (easy rollback without redeploying an older build if you hot-patch).
+ */
+const USE_HUB_DATA_TABLE_INVENTORY = true;
+
+/** Application Dashboard tabs (v0.1.59). URL: ?tab=<id> */
+type DashboardTabId = "summary" | "status" | "signal" | "alerts" | "security" | "inventory";
+
+const DASHBOARD_TABS: { id: DashboardTabId; label: string }[] = [
+  { id: "summary", label: "Summary" },
+  { id: "status", label: "Status" },
+  { id: "signal", label: "Signal" },
+  { id: "alerts", label: "Alerts" },
+  { id: "security", label: "Security" },
+  { id: "inventory", label: "Inventory" },
+];
+
+function parseDashboardTab(value: string | null): DashboardTabId {
+  const match = DASHBOARD_TABS.find((tab) => tab.id === value);
+  return match ? match.id : "summary";
+}
 
 interface GenericRow {
   [key: string]: unknown;
@@ -887,6 +911,7 @@ function hasApplicationVariableConfig(variables: ApplicationVariableConfig | und
 
 function WidgetCard({
   title,
+  provenance,
   subtitle,
   query,
   isLoading,
@@ -894,6 +919,8 @@ function WidgetCard({
   children,
 }: {
   title: string;
+  /** Secondary pack/source label (e.g. "Standard Pack 1"). Shown muted + tooltip. */
+  provenance?: string;
   subtitle?: string;
   query: string;
   isLoading: boolean;
@@ -901,10 +928,25 @@ function WidgetCard({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ border: `1px solid ${theme.border}`, borderRadius: "8px", padding: "16px", backgroundColor: theme.surface }}>
-      <div style={{ marginBottom: "10px" }}>
-        <Heading level={2} style={{ margin: 0, fontSize: "18px" }}>{title}</Heading>
-        {subtitle && <Paragraph style={{ marginTop: "6px", color: theme.textSecondary }}>{subtitle}</Paragraph>}
+    <div style={{ border: `1px solid ${theme.border}`, borderRadius: density.cardRadius, padding: density.cardPadding, backgroundColor: theme.surface }}>
+      <div style={{ marginBottom: "8px" }}>
+        <Heading level={2} style={{ margin: 0, fontSize: density.widgetTitleSize }}>
+          {title}
+          {provenance ? (
+            <span
+              title={`Data source: ${provenance}`}
+              style={{
+                marginLeft: "8px",
+                fontSize: "11px",
+                fontWeight: 500,
+                color: theme.textSecondary,
+              }}
+            >
+              ({provenance})
+            </span>
+          ) : null}
+        </Heading>
+        {subtitle && <Paragraph style={{ marginTop: "4px", color: theme.textSecondary, fontSize: "12px" }}>{subtitle}</Paragraph>}
       </div>
 
       {isLoading && <Paragraph style={{ color: theme.textSecondary }}>Loading...</Paragraph>}
@@ -912,7 +954,7 @@ function WidgetCard({
       {!isLoading && Boolean(error) && (
         <div style={{ backgroundColor: theme.criticalBg, border: `1px solid ${theme.criticalBorder}`, borderRadius: "6px", padding: "10px" }}>
           <p style={{ margin: "0 0 6px 0", fontWeight: 600, color: theme.criticalText }}>Widget query failed</p>
-          <p style={{ margin: 0, fontSize: "12px", color: theme.textSecondary }}>{typeof error === "string" ? error : String(error)}</p>
+          <p style={{ margin: 0, fontSize: density.thFontSize, color: theme.textSecondary }}>{typeof error === "string" ? error : String(error)}</p>
         </div>
       )}
 
@@ -1019,7 +1061,7 @@ function SourceDetailView({ config, source }: { config: MappingConfig; source: L
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
             <thead>
               <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
                 {source.fields.map((field) => (
@@ -1072,6 +1114,20 @@ function SourceDetailView({ config, source }: { config: MappingConfig; source: L
 
 function DashboardView({ config }: { config: MappingConfig }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = parseDashboardTab(searchParams.get("tab"));
+  const setActiveTab = useCallback(
+    (tab: DashboardTabId) => {
+      const next = new URLSearchParams(searchParams);
+      if (tab === "summary") {
+        next.delete("tab");
+      } else {
+        next.set("tab", tab);
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
   const defaultSource = config.sources.find((source) => source.sourceId === config.defaultSourceId) || config.sources[0];
   const variables = config.applicationVariables;
   const cmdbVariableSource =
@@ -1205,7 +1261,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
   }
 
   return (
-    <div style={{ padding: "32px", maxWidth: "1260px", margin: "0 auto" }}>
+    <div style={{ padding: density.pagePadding, maxWidth: density.pageMaxWidth, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" }}>
         <div>
           <Heading level={1} style={{ margin: 0 }}>Application Dashboard</Heading>
@@ -1222,6 +1278,51 @@ function DashboardView({ config }: { config: MappingConfig }) {
         </div>
       </div>
 
+      <div
+        role="tablist"
+        aria-label="Application Dashboard sections"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0",
+          marginBottom: "14px",
+          border: `1px solid ${theme.border}`,
+          borderRadius: "6px",
+          overflow: "hidden",
+          backgroundColor: theme.surface,
+        }}
+      >
+        {DASHBOARD_TABS.map((tab, index) => {
+          const selected = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: "1 1 auto",
+                minWidth: "88px",
+                padding: "10px 12px",
+                border: "none",
+                borderRight: index < DASHBOARD_TABS.length - 1 ? `1px solid ${theme.border}` : "none",
+                backgroundColor: selected ? theme.primarySubtle : theme.surface,
+                color: selected ? theme.primaryText : theme.text,
+                fontWeight: selected ? 700 : 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                boxShadow: selected ? `inset 0 -3px 0 ${theme.primary}` : "none",
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "summary" && (
+      <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(220px, 1fr))", gap: "12px", marginBottom: "12px" }}>
         <WidgetCard
           title="Total Applications"
@@ -1230,7 +1331,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
           isLoading={totalApplicationsResult.isLoading}
           error={totalApplicationsResult.error}
         >
-          <div style={{ fontSize: "38px", fontWeight: 700, color: theme.primaryText }}>{totalApplications}</div>
+          <div style={{ fontSize: density.kpiValueSize, fontWeight: 700, color: theme.primaryText }}>{totalApplications}</div>
         </WidgetCard>
 
         <WidgetCard
@@ -1240,7 +1341,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
           isLoading={appsInDynatraceResult.isLoading}
           error={appsInDynatraceResult.error}
         >
-          <div style={{ fontSize: "38px", fontWeight: 700, color: theme.primaryText }}>{appsInDynatrace}</div>
+          <div style={{ fontSize: density.kpiValueSize, fontWeight: 700, color: theme.primaryText }}>{appsInDynatrace}</div>
         </WidgetCard>
 
         <WidgetCard
@@ -1250,14 +1351,22 @@ function DashboardView({ config }: { config: MappingConfig }) {
           isLoading={signalHealthResult.isLoading}
           error={signalHealthResult.error}
         >
-          <div style={{ fontSize: "38px", fontWeight: 700, color: signalHealth >= 90 ? theme.successText : signalHealth >= 60 ? theme.warningEmphasized : theme.criticalText }}>
+          <div style={{ fontSize: density.kpiValueSize, fontWeight: 700, color: signalHealth >= 90 ? theme.successText : signalHealth >= 60 ? theme.warningEmphasized : theme.criticalText }}>
             {signalHealth}%
           </div>
         </WidgetCard>
       </div>
 
       <div style={{ border: `1px solid ${theme.border}`, borderRadius: "8px", padding: "14px", backgroundColor: theme.surface, marginBottom: "12px" }}>
-        <Heading level={2} style={{ margin: 0, fontSize: "16px" }}>Feature Pack Activation</Heading>
+        <Heading level={2} style={{ margin: 0, fontSize: "16px" }}>
+          Pack Activation
+          <span
+            title="Configured in Setup · telemetry pack enablement"
+            style={{ marginLeft: "8px", fontSize: "12px", fontWeight: 500, color: theme.textSecondary }}
+          >
+            (Setup)
+          </span>
+        </Heading>
         <Paragraph style={{ marginTop: "6px", color: theme.textSecondary }}>
           Telemetry packs are configured in Setup. Standard packs are Dynatrace-native.
         </Paragraph>
@@ -1283,7 +1392,11 @@ function DashboardView({ config }: { config: MappingConfig }) {
               : `${liveStandardPackCount} of ${enabledStandardPackCount} enabled standard pack${enabledStandardPackCount > 1 ? "s are" : " is"} live in this dashboard view.`}
         </Paragraph>
       </div>
+      </>
+      )}
 
+      {activeTab === "status" && (
+      <>
       {standardPack1EntityOnlyMode && (
         <div
           style={{
@@ -1294,7 +1407,15 @@ function DashboardView({ config }: { config: MappingConfig }) {
             marginBottom: "12px",
           }}
         >
-          <Heading level={2} style={{ margin: 0, fontSize: "15px" }}>Standard Pack 1 Capability Status</Heading>
+          <Heading level={2} style={{ margin: 0, fontSize: "15px" }}>
+            Capability Status
+            <span
+              title="Data source: Standard Pack 1"
+              style={{ marginLeft: "8px", fontSize: "12px", fontWeight: 500, color: theme.textSecondary }}
+            >
+              (Standard Pack 1)
+            </span>
+          </Heading>
           <Paragraph style={{ marginTop: "6px", marginBottom: "8px", color: theme.warningEmphasized }}>
             Signal coverage mode is active. Traces and logs use 24h span/log telemetry when app scopes are granted.
           </Paragraph>
@@ -1316,7 +1437,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(180px, 1fr))", gap: "8px" }}>
             <div style={{ backgroundColor: theme.surface, border: `1px solid ${theme.warningBorder}`, borderRadius: "6px", padding: "8px" }}>
               <strong>Metrics</strong>
-              <div style={{ fontSize: "12px", color: theme.textSecondary, marginTop: "4px" }}>Available now via entity monitoring mode.</div>
+              <div style={{ fontSize: density.thFontSize, color: theme.textSecondary, marginTop: "4px" }}>Available now via entity monitoring mode.</div>
             </div>
             <div style={{ backgroundColor: theme.surface, border: `1px solid ${theme.warningBorder}`, borderRadius: "6px", padding: "8px" }}>
               <strong>Traces</strong>
@@ -1334,11 +1455,17 @@ function DashboardView({ config }: { config: MappingConfig }) {
         </div>
       )}
 
+      {!standardPack1Enabled && (
+        <Paragraph style={{ color: theme.warningEmphasized }}>
+          Observability evidence pack is disabled. Enable Standard Pack 1 in Setup → Telemetry Selection.
+        </Paragraph>
+      )}
       {standardPack1Enabled && (
         <div style={{ marginBottom: "12px" }}>
           {!isCostProductMode ? (
             <WidgetCard
-              title="Standard Pack 1: Observability Evidence"
+              title="Observability Evidence"
+              provenance="Standard Pack 1"
               subtitle="Native mode currently expects dt.cost.product app grouping."
               query={variables?.dynatraceApplicationIdFieldPath || ""}
               isLoading={false}
@@ -1351,7 +1478,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
           ) : (
             <>
               <WidgetCard
-                title="Standard Pack 1: Runtime Diagnostics"
+                title="Runtime Diagnostics"
+                provenance="Standard Pack 1"
                 subtitle="Per-path host hits and record totals for trace/log evidence resolution."
                 query={observabilityDiagnosticsQuery}
                 isLoading={observabilityDiagnosticsResult.isLoading}
@@ -1361,20 +1489,20 @@ function DashboardView({ config }: { config: MappingConfig }) {
                   <Paragraph style={{ color: theme.textMuted }}>No diagnostics rows returned for the selected timeframe.</Paragraph>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                       <thead>
                         <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                          <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Path</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Host Hits</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Record Totals</th>
+                          <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Path</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Host Hits</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Record Totals</th>
                         </tr>
                       </thead>
                       <tbody>
                         {observabilityDiagnosticsRows.map((row, index) => (
                           <tr key={`${row.check || "path"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                            <td style={{ padding: "10px" }}>{row.check || "-"}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.host_hits)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.record_hits)}</td>
+                            <td style={{ padding: density.tdPadding }}>{row.check || "-"}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.host_hits)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.record_hits)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1382,10 +1510,30 @@ function DashboardView({ config }: { config: MappingConfig }) {
                   </div>
                 )}
               </WidgetCard>
+            </>
+          )}
+        </div>
+      )}
+      </>
+      )}
 
-              <div style={{ marginTop: "12px" }}>
+      {activeTab === "signal" && (
+      <>
+      {!standardPack1Enabled && (
+        <Paragraph style={{ color: theme.warningEmphasized }}>
+          Signal widgets require Standard Pack 1. Enable it in Setup → Telemetry Selection.
+        </Paragraph>
+      )}
+      {standardPack1Enabled && !isCostProductMode && (
+        <Paragraph style={{ color: theme.warningEmphasized }}>
+          Set Dynatrace Application ID Expression to dt.cost.product in Setup to enable Signal widgets.
+        </Paragraph>
+      )}
+      {standardPack1Enabled && isCostProductMode && (
+        <div style={{ marginBottom: "12px", display: "grid", gap: "12px" }}>
               <WidgetCard
-                title="Standard Pack 1: Signal Quality Summary"
+                title="Signal Quality Summary"
+                provenance="Standard Pack 1"
                 subtitle="24h host evidence by application (Traces, Metrics, Logs)."
                 query={observabilitySignalSummaryQuery}
                 isLoading={observabilitySignalSummaryResult.isLoading}
@@ -1395,36 +1543,36 @@ function DashboardView({ config }: { config: MappingConfig }) {
                   <Paragraph style={{ color: theme.textMuted }}>No observability summary rows returned for the selected timeframe.</Paragraph>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                       <thead>
                         <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                          <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Hosts</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Trace Eligible Hosts</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Trace Hosts</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Traces %</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Trace Count</th>
-                          <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Metrics (Mode)</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Log Hosts</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Logs %</th>
-                          <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Log Count</th>
+                          <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Hosts</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Trace Eligible Hosts</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Trace Hosts</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Traces %</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Trace Count</th>
+                          <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Metrics (Mode)</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Log Hosts</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Logs %</th>
+                          <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Log Count</th>
                         </tr>
                       </thead>
                       <tbody>
                         {observabilitySummaryRows.map((row, index) => (
                           <tr key={`${row.app_id || "app"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                            <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.host_count)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatSignalCount(row.trace_eligible_hosts, telemetryRuntimeBlocked)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatEligibleTraceCount(row.traces_hosts, row.trace_eligible_hosts, telemetryRuntimeBlocked)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatSignalPercent(row.traces_pct, telemetryRuntimeBlocked)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatEligibleTraceCount(row.trace_event_count, row.trace_eligible_hosts, telemetryRuntimeBlocked)}</td>
-                            <td style={{ padding: "10px", textAlign: "center", color: statusTone(formatYesNoFromPercent(row.metrics_pct)), fontWeight: 700 }}>
+                            <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.host_count)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatSignalCount(row.trace_eligible_hosts, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatEligibleTraceCount(row.traces_hosts, row.trace_eligible_hosts, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatSignalPercent(row.traces_pct, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatEligibleTraceCount(row.trace_event_count, row.trace_eligible_hosts, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "center", color: statusTone(formatYesNoFromPercent(row.metrics_pct)), fontWeight: 700 }}>
                               {formatYesNoFromPercent(row.metrics_pct)}
                             </td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatSignalCount(row.logs_hosts, telemetryRuntimeBlocked)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatSignalPercent(row.logs_pct, telemetryRuntimeBlocked)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }}>{formatSignalCount(row.log_event_count, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatSignalCount(row.logs_hosts, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatSignalPercent(row.logs_pct, telemetryRuntimeBlocked)}</td>
+                            <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatSignalCount(row.log_event_count, telemetryRuntimeBlocked)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1432,11 +1580,11 @@ function DashboardView({ config }: { config: MappingConfig }) {
                   </div>
                 )}
               </WidgetCard>
-              </div>
 
               <div style={{ marginTop: "12px" }}>
                 <WidgetCard
-                  title="Standard Pack 1: Evidence by Host"
+                  title="Evidence by Host"
+                  provenance="Standard Pack 1"
                   subtitle="24h host evidence matrix with explicit UNMAPPED grouping."
                   query={observabilityByHostQuery}
                   isLoading={observabilityByHostResult.isLoading}
@@ -1446,34 +1594,34 @@ function DashboardView({ config }: { config: MappingConfig }) {
                     <Paragraph style={{ color: theme.textMuted }}>No host evidence rows returned for the selected timeframe.</Paragraph>
                   ) : (
                     <div style={{ overflowX: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                         <thead>
                           <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Host</th>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Monitoring Mode</th>
-                            <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Linked Services</th>
-                            <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Trace Count</th>
-                            <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Traces</th>
-                            <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Metrics (Mode)</th>
-                            <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Log Count</th>
-                            <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Logs</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Host</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Monitoring Mode</th>
+                            <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Linked Services</th>
+                            <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Trace Count</th>
+                            <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Traces</th>
+                            <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Metrics (Mode)</th>
+                            <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Log Count</th>
+                            <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Logs</th>
                           </tr>
                         </thead>
                         <tbody>
                           {observabilityHostRows.map((row, index) => (
                             <tr key={`${row.host_name || "host"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                              <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                              <td style={{ padding: "10px" }}>{row.host_name || "-"}</td>
-                              <td style={{ padding: "10px" }}>{row.monitoring_mode || "-"}</td>
-                              <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.service_count)}</td>
-                              <td style={{ padding: "10px", textAlign: "right" }}>{row.traces_status === "N/A" ? "-" : formatSignalCount(row.spans_count_num, telemetryRuntimeBlocked)}</td>
-                              <td style={{ padding: "10px", textAlign: "center", color: statusTone(resolveSignalStatus(row.traces_status, telemetryRuntimeBlocked)), fontWeight: 700 }}>
+                              <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                              <td style={{ padding: density.tdPadding }}>{row.host_name || "-"}</td>
+                              <td style={{ padding: density.tdPadding }}>{row.monitoring_mode || "-"}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.service_count)}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "right" }}>{row.traces_status === "N/A" ? "-" : formatSignalCount(row.spans_count_num, telemetryRuntimeBlocked)}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "center", color: statusTone(resolveSignalStatus(row.traces_status, telemetryRuntimeBlocked)), fontWeight: 700 }}>
                                 {resolveSignalStatus(row.traces_status, telemetryRuntimeBlocked)}
                               </td>
-                              <td style={{ padding: "10px", textAlign: "center", color: statusTone(row.metrics_status), fontWeight: 700 }}>{row.metrics_status || "NO"}</td>
-                              <td style={{ padding: "10px", textAlign: "right" }}>{formatSignalCount(row.logs_count_num, telemetryRuntimeBlocked)}</td>
-                              <td style={{ padding: "10px", textAlign: "center", color: statusTone(resolveSignalStatus(row.logs_status, telemetryRuntimeBlocked)), fontWeight: 700 }}>
+                              <td style={{ padding: density.tdPadding, textAlign: "center", color: statusTone(row.metrics_status), fontWeight: 700 }}>{row.metrics_status || "NO"}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatSignalCount(row.logs_count_num, telemetryRuntimeBlocked)}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "center", color: statusTone(resolveSignalStatus(row.logs_status, telemetryRuntimeBlocked)), fontWeight: 700 }}>
                                 {resolveSignalStatus(row.logs_status, telemetryRuntimeBlocked)}
                               </td>
                             </tr>
@@ -1487,7 +1635,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
 
               <div style={{ marginTop: "12px" }}>
                 <WidgetCard
-                  title="Standard Pack 1: Trace Coverage Gaps"
+                  title="Trace Coverage Gaps"
+                  provenance="Standard Pack 1"
                   subtitle="FULL_STACK hosts with zero traces in 24h, including inferred reason."
                   query={traceCoverageGapsQuery}
                   isLoading={traceCoverageGapsResult.isLoading}
@@ -1497,26 +1646,26 @@ function DashboardView({ config }: { config: MappingConfig }) {
                     <Paragraph style={{ color: theme.successText }}>No FULL_STACK hosts currently show trace coverage gaps.</Paragraph>
                   ) : (
                     <div style={{ overflowX: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                         <thead>
                           <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Host</th>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Monitoring Mode</th>
-                            <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Linked Services</th>
-                            <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Service-Path Spans</th>
-                            <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Reason</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Host</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Monitoring Mode</th>
+                            <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Linked Services</th>
+                            <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Service-Path Spans</th>
+                            <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Reason</th>
                           </tr>
                         </thead>
                         <tbody>
                           {traceCoverageGapRows.map((row, index) => (
                             <tr key={`${row.host_name || "host"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                              <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                              <td style={{ padding: "10px" }}>{row.host_name || "-"}</td>
-                              <td style={{ padding: "10px" }}>{row.monitoring_mode || "-"}</td>
-                              <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.service_count)}</td>
-                              <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.spans_by_service_host)}</td>
-                              <td style={{ padding: "10px", color: theme.warningEmphasized, fontWeight: 600 }}>{row.gap_reason || "-"}</td>
+                              <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                              <td style={{ padding: density.tdPadding }}>{row.host_name || "-"}</td>
+                              <td style={{ padding: density.tdPadding }}>{row.monitoring_mode || "-"}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.service_count)}</td>
+                              <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.spans_by_service_host)}</td>
+                              <td style={{ padding: density.tdPadding, color: theme.warningEmphasized, fontWeight: 600 }}>{row.gap_reason || "-"}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1525,18 +1674,24 @@ function DashboardView({ config }: { config: MappingConfig }) {
                   )}
                 </WidgetCard>
               </div>
-            </>
-          )}
         </div>
       )}
+      </>
+      )}
 
-      {(standardPack2Enabled || standardPack3Enabled) && (
-        <div style={{ marginBottom: "12px", display: "grid", gap: "12px" }}>
-          {standardPack2Enabled && (
+      {activeTab === "alerts" && (
+      <>
+      {!standardPack2Enabled && (
+        <Paragraph style={{ color: theme.warningEmphasized }}>
+          Alert readiness requires Standard Pack 2. Enable it in Setup → Telemetry Selection.
+        </Paragraph>
+      )}
+      {standardPack2Enabled && (
             <>
               {!isCostProductMode ? (
                 <WidgetCard
-                  title="Standard Pack 2: Problems & Alerts"
+                  title="Problems & Alerts"
+                  provenance="Standard Pack 2"
                   subtitle="Native mode currently expects dt.cost.product app grouping."
                   query={variables?.dynatraceApplicationIdFieldPath || ""}
                   isLoading={false}
@@ -1549,7 +1704,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
               ) : (
                 <>
                   <WidgetCard
-                    title="Standard Pack 2: Alert Readiness Summary"
+                    title="Alert Readiness Summary"
+                    provenance="Standard Pack 2"
                     subtitle="Entity-only fallback: readiness inferred from host monitoring mode coverage by application."
                     query={problemsReadinessSummaryQuery}
                     isLoading={problemsReadinessSummaryResult.isLoading}
@@ -1559,24 +1715,24 @@ function DashboardView({ config }: { config: MappingConfig }) {
                       <Paragraph style={{ color: theme.textMuted }}>No readiness rows returned for the selected timeframe.</Paragraph>
                     ) : (
                       <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                           <thead>
                             <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                              <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                              <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Hosts</th>
-                              <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Monitored Hosts</th>
-                              <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Coverage %</th>
-                              <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Readiness</th>
+                              <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                              <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Hosts</th>
+                              <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Monitored Hosts</th>
+                              <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Coverage %</th>
+                              <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Readiness</th>
                             </tr>
                           </thead>
                           <tbody>
                             {problemsSummaryRows.map((row, index) => (
                               <tr key={`${row.app_id || "app"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                                <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                                <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.host_count)}</td>
-                                <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.monitored_hosts)}</td>
-                                <td style={{ padding: "10px", textAlign: "right" }}>{formatPercent(row.monitoring_pct, "-")}</td>
-                                <td style={{ padding: "10px", textAlign: "center", color: readinessTone(row.readiness), fontWeight: 700 }}>{row.readiness || "GAP"}</td>
+                                <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.host_count)}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.monitored_hosts)}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatPercent(row.monitoring_pct, "-")}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "center", color: readinessTone(row.readiness), fontWeight: 700 }}>{row.readiness || "GAP"}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1587,7 +1743,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
 
                   <div style={{ marginTop: "12px" }}>
                     <WidgetCard
-                      title="Standard Pack 2: Alert Readiness by Host"
+                      title="Alert Readiness by Host"
+                      provenance="Standard Pack 2"
                       subtitle="Entity-only host readiness matrix for alerting prerequisites."
                       query={problemsReadinessByHostQuery}
                       isLoading={problemsReadinessByHostResult.isLoading}
@@ -1597,22 +1754,22 @@ function DashboardView({ config }: { config: MappingConfig }) {
                         <Paragraph style={{ color: theme.textMuted }}>No host readiness rows returned for the selected timeframe.</Paragraph>
                       ) : (
                         <div style={{ overflowX: "auto" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                             <thead>
                               <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                                <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                                <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Host</th>
-                                <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Monitoring Mode</th>
-                                <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Readiness</th>
+                                <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                                <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Host</th>
+                                <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Monitoring Mode</th>
+                                <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Readiness</th>
                               </tr>
                             </thead>
                             <tbody>
                               {problemsHostRows.map((row, index) => (
                                 <tr key={`${row.host_name || "host"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                                  <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                                  <td style={{ padding: "10px" }}>{row.host_name || "-"}</td>
-                                  <td style={{ padding: "10px" }}>{row.monitoring_mode || "-"}</td>
-                                  <td style={{ padding: "10px", textAlign: "center", color: readinessTone(row.readiness), fontWeight: 700 }}>{row.readiness || "GAP"}</td>
+                                  <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                                  <td style={{ padding: density.tdPadding }}>{row.host_name || "-"}</td>
+                                  <td style={{ padding: density.tdPadding }}>{row.monitoring_mode || "-"}</td>
+                                  <td style={{ padding: density.tdPadding, textAlign: "center", color: readinessTone(row.readiness), fontWeight: 700 }}>{row.readiness || "GAP"}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1625,11 +1782,22 @@ function DashboardView({ config }: { config: MappingConfig }) {
               )}
             </>
           )}
-          {standardPack3Enabled && (
+      </>
+      )}
+
+      {activeTab === "security" && (
+      <>
+      {!standardPack3Enabled && (
+        <Paragraph style={{ color: theme.warningEmphasized }}>
+          Vulnerability baseline requires Standard Pack 3. Enable it in Setup → Telemetry Selection.
+        </Paragraph>
+      )}
+      {standardPack3Enabled && (
             <>
               {!isCostProductMode ? (
                 <WidgetCard
-                  title="Standard Pack 3: Vulnerabilities"
+                  title="Vulnerabilities"
+                  provenance="Standard Pack 3"
                   subtitle="Native mode currently expects dt.cost.product app grouping."
                   query={variables?.dynatraceApplicationIdFieldPath || ""}
                   isLoading={false}
@@ -1642,7 +1810,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
               ) : (
                 <>
                   <WidgetCard
-                    title="Standard Pack 3: Vulnerability Exposure Baseline"
+                    title="Vulnerability Exposure Baseline"
+                    provenance="Standard Pack 3"
                     subtitle="Entity-only fallback: risk band by tier with monitoring coverage as vulnerability visibility baseline."
                     query={vulnerabilityBaselineSummaryQuery}
                     isLoading={vulnerabilityBaselineSummaryResult.isLoading}
@@ -1652,28 +1821,28 @@ function DashboardView({ config }: { config: MappingConfig }) {
                       <Paragraph style={{ color: theme.textMuted }}>No vulnerability baseline rows returned for the selected timeframe.</Paragraph>
                     ) : (
                       <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                           <thead>
                             <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                              <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                              {showOwnerColumn && <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Owner</th>}
-                              {showTierColumn && <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Tier</th>}
-                              <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Risk Band</th>
-                              <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Hosts</th>
-                              <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Monitored</th>
-                              <th style={{ padding: "12px 10px", textAlign: "right", fontSize: "12px", color: theme.textSecondary }}>Coverage %</th>
+                              <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                              {showOwnerColumn && <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Owner</th>}
+                              {showTierColumn && <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Tier</th>}
+                              <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Risk Band</th>
+                              <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Hosts</th>
+                              <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Monitored</th>
+                              <th style={{ padding: density.thPadding, textAlign: "right", fontSize: density.thFontSize, color: theme.textSecondary }}>Coverage %</th>
                             </tr>
                           </thead>
                           <tbody>
                             {vulnerabilitySummaryRows.map((row, index) => (
                               <tr key={`${row.app_id || "app"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                                <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                                {showOwnerColumn && <td style={{ padding: "10px" }}>{row.owner || "-"}</td>}
-                                {showTierColumn && <td style={{ padding: "10px" }}>{row.tier || "-"}</td>}
-                                <td style={{ padding: "10px", textAlign: "center", color: riskTone(row.risk_band), fontWeight: 700 }}>{row.risk_band || "BASELINE"}</td>
-                                <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.host_count)}</td>
-                                <td style={{ padding: "10px", textAlign: "right" }}>{formatCount(row.monitored_hosts)}</td>
-                                <td style={{ padding: "10px", textAlign: "right" }}>{formatPercent(row.monitoring_pct, "-")}</td>
+                                <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                                {showOwnerColumn && <td style={{ padding: density.tdPadding }}>{row.owner || "-"}</td>}
+                                {showTierColumn && <td style={{ padding: density.tdPadding }}>{row.tier || "-"}</td>}
+                                <td style={{ padding: density.tdPadding, textAlign: "center", color: riskTone(row.risk_band), fontWeight: 700 }}>{row.risk_band || "BASELINE"}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.host_count)}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatCount(row.monitored_hosts)}</td>
+                                <td style={{ padding: density.tdPadding, textAlign: "right" }}>{formatPercent(row.monitoring_pct, "-")}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1684,7 +1853,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
 
                   <div style={{ marginTop: "12px" }}>
                     <WidgetCard
-                      title="Standard Pack 3: Vulnerability Baseline by Host"
+                      title="Vulnerability Baseline by Host"
+                      provenance="Standard Pack 3"
                       subtitle="Entity-only host baseline for vulnerability visibility and ownership routing."
                       query={vulnerabilityBaselineByHostQuery}
                       isLoading={vulnerabilityBaselineByHostResult.isLoading}
@@ -1694,28 +1864,28 @@ function DashboardView({ config }: { config: MappingConfig }) {
                         <Paragraph style={{ color: theme.textMuted }}>No vulnerability baseline host rows returned for the selected timeframe.</Paragraph>
                       ) : (
                         <div style={{ overflowX: "auto" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                             <thead>
                               <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                                <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application</th>
-                                <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Host</th>
-                                {showOwnerColumn && <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Owner</th>}
-                                {showTierColumn && <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Tier</th>}
-                                <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Risk Band</th>
-                                <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Monitoring Mode</th>
-                                <th style={{ padding: "12px 10px", textAlign: "center", fontSize: "12px", color: theme.textSecondary }}>Readiness</th>
+                                <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application</th>
+                                <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Host</th>
+                                {showOwnerColumn && <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Owner</th>}
+                                {showTierColumn && <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Tier</th>}
+                                <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Risk Band</th>
+                                <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Monitoring Mode</th>
+                                <th style={{ padding: density.thPadding, textAlign: "center", fontSize: density.thFontSize, color: theme.textSecondary }}>Readiness</th>
                               </tr>
                             </thead>
                             <tbody>
                               {vulnerabilityHostRows.map((row, index) => (
                                 <tr key={`${row.host_name || "host"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                                  <td style={{ padding: "10px" }}>{row.app_name || row.app_id || "-"}</td>
-                                  <td style={{ padding: "10px" }}>{row.host_name || "-"}</td>
-                                  {showOwnerColumn && <td style={{ padding: "10px" }}>{row.owner || "-"}</td>}
-                                  {showTierColumn && <td style={{ padding: "10px" }}>{row.tier || "-"}</td>}
-                                  <td style={{ padding: "10px", textAlign: "center", color: riskTone(row.risk_band), fontWeight: 700 }}>{row.risk_band || "BASELINE"}</td>
-                                  <td style={{ padding: "10px" }}>{row.monitoring_mode || "-"}</td>
-                                  <td style={{ padding: "10px", textAlign: "center", color: readinessTone(row.readiness), fontWeight: 700 }}>{row.readiness || "GAP"}</td>
+                                  <td style={{ padding: density.tdPadding }}>{row.app_name || row.app_id || "-"}</td>
+                                  <td style={{ padding: density.tdPadding }}>{row.host_name || "-"}</td>
+                                  {showOwnerColumn && <td style={{ padding: density.tdPadding }}>{row.owner || "-"}</td>}
+                                  {showTierColumn && <td style={{ padding: density.tdPadding }}>{row.tier || "-"}</td>}
+                                  <td style={{ padding: density.tdPadding, textAlign: "center", color: riskTone(row.risk_band), fontWeight: 700 }}>{row.risk_band || "BASELINE"}</td>
+                                  <td style={{ padding: density.tdPadding }}>{row.monitoring_mode || "-"}</td>
+                                  <td style={{ padding: density.tdPadding, textAlign: "center", color: readinessTone(row.readiness), fontWeight: 700 }}>{row.readiness || "GAP"}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1728,9 +1898,11 @@ function DashboardView({ config }: { config: MappingConfig }) {
               )}
             </>
           )}
-        </div>
+      </>
       )}
 
+      {activeTab === "inventory" && (
+      <>
       <WidgetCard
         title="Application Inventory"
         subtitle="CMDB and Dynatrace union with classification"
@@ -1740,28 +1912,51 @@ function DashboardView({ config }: { config: MappingConfig }) {
       >
         {inventoryRows.length === 0 ? (
           <Paragraph style={{ color: theme.textMuted }}>No inventory rows returned by current mappings.</Paragraph>
+        ) : USE_HUB_DATA_TABLE_INVENTORY ? (
+          <HubDataTable<InventoryRow>
+            storageKey="aoh.hubDataTable.inventory.v1"
+            rows={inventoryRows}
+            rowKey={(row, index) => `${row.app_id || "row"}-${index}`}
+            emptyMessage="No inventory rows returned by current mappings."
+            columns={
+              [
+                { id: "app_id", label: "Application ID", width: 140 },
+                { id: "app_name", label: "Application Name", width: 180 },
+                ...(showOwnerColumn ? [{ id: "owner", label: "Owner", width: 120 } satisfies HubColumnDef<InventoryRow>] : []),
+                ...(showTierColumn ? [{ id: "tier", label: "Tier", width: 100 } satisfies HubColumnDef<InventoryRow>] : []),
+                { id: "hosts", label: "Hosts", width: 100, align: "right" as const },
+                {
+                  id: "classification",
+                  label: "Classification",
+                  width: 140,
+                  render: (row) => renderField("pill", row.classification || "-"),
+                },
+              ] as HubColumnDef<InventoryRow>[]
+            }
+          />
         ) : (
+          /* Legacy plain table — keep for one-line rollback via USE_HUB_DATA_TABLE_INVENTORY = false */
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
               <thead>
                 <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                  <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application ID</th>
-                  <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Application Name</th>
-                  {showOwnerColumn && <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Owner</th>}
-                  {showTierColumn && <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Tier</th>}
-                  <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Hosts</th>
-                  <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Classification</th>
+                  <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application ID</th>
+                  <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Application Name</th>
+                  {showOwnerColumn && <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Owner</th>}
+                  {showTierColumn && <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Tier</th>}
+                  <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Hosts</th>
+                  <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Classification</th>
                 </tr>
               </thead>
               <tbody>
                 {inventoryRows.map((row, index) => (
                   <tr key={`${row.app_id || "row"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                    <td style={{ padding: "10px" }}>{row.app_id || "-"}</td>
-                    <td style={{ padding: "10px" }}>{row.app_name || "-"}</td>
-                    {showOwnerColumn && <td style={{ padding: "10px" }}>{row.owner || "-"}</td>}
-                    {showTierColumn && <td style={{ padding: "10px" }}>{row.tier || "-"}</td>}
-                    <td style={{ padding: "10px" }}>{row.hosts || "-"}</td>
-                    <td style={{ padding: "10px" }}>
+                    <td style={{ padding: density.tdPadding }}>{row.app_id || "-"}</td>
+                    <td style={{ padding: density.tdPadding }}>{row.app_name || "-"}</td>
+                    {showOwnerColumn && <td style={{ padding: density.tdPadding }}>{row.owner || "-"}</td>}
+                    {showTierColumn && <td style={{ padding: density.tdPadding }}>{row.tier || "-"}</td>}
+                    <td style={{ padding: density.tdPadding }}>{row.hosts || "-"}</td>
+                    <td style={{ padding: density.tdPadding }}>
                       {renderField("pill", row.classification || "-")}
                     </td>
                   </tr>
@@ -1785,22 +1980,22 @@ function DashboardView({ config }: { config: MappingConfig }) {
               <Paragraph style={{ color: theme.successText }}>No hosts currently have multiple dt.cost.product values.</Paragraph>
             ) : (
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: density.tableFontSize }}>
                   <thead>
                     <tr style={{ borderBottom: `2px solid ${theme.border}`, backgroundColor: theme.surfaceSubtle }}>
-                      <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Host</th>
-                      <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Newest Value Used</th>
-                      <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Distinct Values Seen</th>
-                      <th style={{ padding: "12px 10px", textAlign: "left", fontSize: "12px", color: theme.textSecondary }}>Count</th>
+                      <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Host</th>
+                      <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Newest Value Used</th>
+                      <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Distinct Values Seen</th>
+                      <th style={{ padding: density.thPadding, textAlign: "left", fontSize: density.thFontSize, color: theme.textSecondary }}>Count</th>
                     </tr>
                   </thead>
                   <tbody>
                     {costProductAmbiguityRows.map((row, index) => (
                       <tr key={`${row.host_name || "host"}-${index}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                        <td style={{ padding: "10px" }}>{row.host_name || "-"}</td>
-                        <td style={{ padding: "10px" }}>{row.newest_candidate || "-"}</td>
-                        <td style={{ padding: "10px" }}>{row.candidate_values || "-"}</td>
-                        <td style={{ padding: "10px" }}>{typeof row.candidate_count === "number" ? row.candidate_count : "-"}</td>
+                        <td style={{ padding: density.tdPadding }}>{row.host_name || "-"}</td>
+                        <td style={{ padding: density.tdPadding }}>{row.newest_candidate || "-"}</td>
+                        <td style={{ padding: density.tdPadding }}>{row.candidate_values || "-"}</td>
+                        <td style={{ padding: density.tdPadding }}>{typeof row.candidate_count === "number" ? row.candidate_count : "-"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1809,6 +2004,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
             )}
           </WidgetCard>
         </div>
+      )}
+      </>
       )}
     </div>
   );

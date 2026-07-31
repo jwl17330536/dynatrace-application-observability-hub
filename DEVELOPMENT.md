@@ -144,3 +144,11 @@ import { useMappingConfig } from "@hooks/useMappingConfig";
 Always coordinate with `package.json`. Check existing apps for dependency versions:
 - NetFlow, UniFi, Proxmox use same Strato/SDK versions
 - Keep versions in sync across observability apps
+
+### Dashboard density (v0.1.60+)
+
+Application Dashboard spacing/fonts live in `ui/app/utils/themeStyles.ts` as the `density` export (Flow Analyst–like compact tables: ~12px body, tighter cell padding). Change tokens there rather than one-off magic numbers in `Overview.tsx` when adjusting visual density. Do not mix density changes with query or tab logic in the same release.
+
+### HubDataTable (v0.1.61+)
+
+`ui/app/components/HubDataTable.tsx` is a small client-side table (sort / filter / column picker / resize) inspired by Netflow Flow Analyst. Migrate **one** Overview table per version. Application Inventory is first (`USE_HUB_DATA_TABLE_INVENTORY` in `Overview.tsx`). Prefer keeping the legacy `<table>` branch until the next table migration proves stable.
