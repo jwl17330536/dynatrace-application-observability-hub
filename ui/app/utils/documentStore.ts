@@ -231,9 +231,9 @@ export function getDefaultApplicationVariables(): ApplicationVariableConfig {
     cmdbVariableSourceId: "",
     dynatraceApplicationIdFieldPath: "",
     cmdbApplicationIdColumn: "",
-    cmdbApplicationNameColumn: "",
-    cmdbOwnerColumn: "",
-    cmdbTierColumn: "",
+    cmdbApplicationNameColumn: IGNORE_COLUMN_VALUE,
+    cmdbOwnerColumn: IGNORE_COLUMN_VALUE,
+    cmdbTierColumn: IGNORE_COLUMN_VALUE,
   };
 }
 
@@ -364,20 +364,11 @@ export function validateConfig(config: MappingConfig): ValidationResult {
     if (!vars.dynatraceApplicationIdFieldPath || !vars.dynatraceApplicationIdFieldPath.trim()) {
       errors.push("Dynatrace Application ID expression is required");
     }
-    if (!vars.cmdbApplicationNameColumn || !vars.cmdbApplicationNameColumn.trim()) {
-      errors.push("CMDB Application Name column is required");
-    }
-    if (!vars.cmdbOwnerColumn || !vars.cmdbOwnerColumn.trim()) {
-      errors.push("CMDB Owner column is required");
-    }
-    if (!vars.cmdbTierColumn || !vars.cmdbTierColumn.trim()) {
-      errors.push("CMDB Tier column is required");
-    }
 
     const selectedSource = config.sources.find((source) => source.sourceId === vars.cmdbVariableSourceId);
     const selectedSourceUnique = selectedSource?.fields.find((field) => field.id === "uniqueApplicationId")?.sourceColumn?.trim();
     if (!selectedSourceUnique) {
-      errors.push("Selected CMDB variable source must map Unique Application ID in Step 3");
+      errors.push("Selected CMDB variable source must map Unique Application ID in Step 2");
     }
   }
 

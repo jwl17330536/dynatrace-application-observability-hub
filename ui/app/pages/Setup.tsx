@@ -35,6 +35,8 @@ interface LookupUploadState {
   error: string | null;
 }
 
+type SourceSetupPath = "upload" | "existing";
+
 interface SetupState {
   sources: LookupSourceConfig[];
   defaultSourceId: string;
@@ -43,6 +45,7 @@ interface SetupState {
   autoFilledUniqueColumnBySource: Record<string, string>;
   detectedColumnsBySource: Record<string, string[]>;
   uploadBySource: Record<string, LookupUploadState>;
+  setupPathBySource: Record<string, SourceSetupPath>;
   isInitializing: boolean;
   isSaving: boolean;
   error: string | null;
@@ -71,10 +74,35 @@ const labelStyle: React.CSSProperties = {
 
 const hintStyle: React.CSSProperties = {
   fontSize: "12px",
-  color: theme.textMuted,
+  color: theme.textSecondary,
   marginTop: "4px",
   display: "block",
+  lineHeight: 1.45,
 };
+
+/** Dynatrace-style segmented toggle: connected halves, primary fill when selected. */
+function pathSegmentStyle(active: boolean, side: "left" | "right"): React.CSSProperties {
+  return {
+    flex: 1,
+    minWidth: "0",
+    padding: "12px 16px",
+    border: "none",
+    borderRight: side === "left" ? `1px solid ${theme.border}` : "none",
+    borderRadius: 0,
+    backgroundColor: active ? theme.primarySubtle : theme.surface,
+    color: active ? theme.primaryText : theme.text,
+    fontWeight: active ? 700 : 600,
+    fontSize: "13px",
+    lineHeight: 1.35,
+    cursor: "pointer",
+    textAlign: "left" as const,
+    boxShadow: active ? `inset 0 -3px 0 ${theme.primary}` : "none",
+  };
+}
+
+function pathEyebrowOpacity(active: boolean): number {
+  return active ? 1 : 0.8;
+}
 
 function slugify(value: string): string {
   return value
@@ -280,6 +308,7 @@ function SourcePreview({
           borderRadius: "4px",
           fontSize: "12px",
           overflowX: "auto",
+          color: theme.text,
         }}
       >
         {request.query}
@@ -316,6 +345,7 @@ function SourcePreview({
               borderRadius: "4px",
               fontSize: "12px",
               overflowX: "auto",
+              color: theme.text,
             }}
           >
             {JSON.stringify(firstRecord, null, 2)}
@@ -356,6 +386,7 @@ export const Setup: React.FC = () => {
     autoFilledUniqueColumnBySource: {},
     detectedColumnsBySource: {},
     uploadBySource: {},
+    setupPathBySource: { [DEFAULT_SOURCE.sourceId]: "existing" },
     isInitializing: true,
     isSaving: false,
     error: null,
@@ -380,6 +411,9 @@ export const Setup: React.FC = () => {
             ...(existing.applicationVariables || {}),
           };
 
+          const setupPathBySource = Object.fromEntries(
+            existingSources.map((source) => [source.sourceId, "existing" as SourceSetupPath])
+          );
           setState((prev) => ({
             ...prev,
             sources: existingSources,
@@ -391,6 +425,7 @@ export const Setup: React.FC = () => {
               cmdbVariableSourceId: mergedVariables.cmdbVariableSourceId || existingDefaultSource,
               cmdbOwnerColumn: normalizeOptionalColumnSelection(mergedVariables.cmdbOwnerColumn),
               cmdbTierColumn: normalizeOptionalColumnSelection(mergedVariables.cmdbTierColumn),
+              cmdbApplicationNameColumn: normalizeOptionalColumnSelection(mergedVariables.cmdbApplicationNameColumn),
               cmdbApplicationIdColumn:
                 getUniqueApplicationIdColumn(
                   existingSources.find((source) => source.sourceId === (mergedVariables.cmdbVariableSourceId || existingDefaultSource)) ||
@@ -398,6 +433,7 @@ export const Setup: React.FC = () => {
                 ) || mergedVariables.cmdbApplicationIdColumn,
             },
             uploadBySource: {},
+            setupPathBySource,
             isInitializing: false,
             error: null,
           }));
@@ -523,6 +559,21 @@ export const Setup: React.FC = () => {
       ...prev,
       error: null,
       sources: [...prev.sources, source],
+      setupPathBySource: {
+        ...prev.setupPathBySource,
+        [source.sourceId]: "existing",
+      },
+    }));
+  };
+
+  const setSetupPath = (sourceId: string, path: SourceSetupPath) => {
+    setState((prev) => ({
+      ...prev,
+      error: null,
+      setupPathBySource: {
+        ...prev.setupPathBySource,
+        [sourceId]: path,
+      },
     }));
   };
 
@@ -554,6 +605,9 @@ export const Setup: React.FC = () => {
         ),
       };
 
+      const nextSetupPathBySource = { ...prev.setupPathBySource };
+      delete nextSetupPathBySource[sourceId];
+
       return {
         ...prev,
         error: null,
@@ -563,6 +617,7 @@ export const Setup: React.FC = () => {
         autoFilledUniqueColumnBySource: nextAutoFilledUniqueColumnBySource,
         detectedColumnsBySource: nextDetectedColumnsBySource,
         uploadBySource: Object.fromEntries(Object.entries(prev.uploadBySource).filter(([key]) => key !== sourceId)),
+        setupPathBySource: nextSetupPathBySource,
         previewBySource: nextPreviewBySource,
       };
     });
@@ -668,6 +723,7 @@ export const Setup: React.FC = () => {
       autoFilledUniqueColumnBySource: {},
       detectedColumnsBySource: {},
       uploadBySource: {},
+      setupPathBySource: { [source.sourceId]: "existing" },
       isSaving: false,
       error: null,
       previewBySource: {},
@@ -887,7 +943,12 @@ export const Setup: React.FC = () => {
     state.sources.find((source) => source.sourceId === state.applicationVariables.cmdbVariableSourceId) || state.sources[0];
   const derivedCmdbIdColumn = getUniqueApplicationIdColumn(selectedCmdbSource);
   const selectedColumns = selectedCmdbSource ? state.detectedColumnsBySource[selectedCmdbSource.sourceId] || [] : [];
-  const cmdbNameOptions = buildColumnOptions(selectedColumns, state.applicationVariables.cmdbApplicationNameColumn);
+  const cmdbNameOptions = buildColumnOptions(
+    selectedColumns,
+    state.applicationVariables.cmdbApplicationNameColumn === IGNORE_COLUMN_VALUE
+      ? ""
+      : state.applicationVariables.cmdbApplicationNameColumn
+  );
   const cmdbOwnerCurrent = state.applicationVariables.cmdbOwnerColumn === IGNORE_COLUMN_VALUE ? "" : state.applicationVariables.cmdbOwnerColumn;
   const cmdbTierCurrent = state.applicationVariables.cmdbTierColumn === IGNORE_COLUMN_VALUE ? "" : state.applicationVariables.cmdbTierColumn;
   const cmdbOwnerOptions = buildColumnOptions(selectedColumns, cmdbOwnerCurrent);
@@ -903,12 +964,30 @@ export const Setup: React.FC = () => {
   }
 
   return (
-    <div style={{ maxWidth: "980px", margin: "0 auto", padding: "40px 24px" }}>
+    <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "40px 24px" }}>
       <Heading level={1}>Application Observability Hub</Heading>
-      <Paragraph style={{ marginTop: "8px", color: theme.textSecondary }}>
-        Follow this order: upload lookup CSV (optional), configure source details, map fields, then set join variables.
-        The Unique Application ID mapping is required only once across all sources.
-      </Paragraph>
+
+      <div
+        style={{
+          marginTop: "14px",
+          padding: "14px 16px",
+          border: `1px solid ${theme.border}`,
+          borderRadius: "8px",
+          backgroundColor: theme.surfaceSubtle,
+        }}
+      >
+        <div style={{ fontWeight: 700, color: theme.text, marginBottom: "8px" }}>Prerequisites</div>
+        <Paragraph style={{ margin: "0 0 6px 0", color: theme.textSecondary, fontSize: "13px" }}>
+          <strong>Required join keys:</strong> (1) a unique Application ID column in your lookup, and (2) a Dynatrace
+          Application ID expression on entities (for example <code>dt.cost.product</code>).
+        </Paragraph>
+        <Paragraph style={{ margin: "0 0 6px 0", color: theme.textSecondary, fontSize: "13px" }}>
+          <strong>Optional enrichment:</strong> application name, owner, and tier (can be ignored).
+        </Paragraph>
+        <Paragraph style={{ margin: 0, color: theme.textSecondary, fontSize: "13px" }}>
+          Flow: connect lookup (upload <strong>or</strong> existing) → Load Preview → map Unique Application ID → set join variables.
+        </Paragraph>
+      </div>
 
       <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
         <Button variant="emphasized" onClick={addSource} disabled={state.isSaving}>
@@ -917,7 +996,19 @@ export const Setup: React.FC = () => {
       </div>
 
       <div style={{ marginTop: "24px", display: "grid", gap: "18px" }}>
-        {state.sources.map((source, index) => (
+        {state.sources.map((source, index) => {
+          const upload = state.uploadBySource[source.sourceId] || createDefaultUploadState();
+          const setupPath = state.setupPathBySource[source.sourceId] || "existing";
+          const uploadActive = setupPath === "upload";
+          const existingActive = setupPath === "existing";
+          const panelBase: React.CSSProperties = {
+            border: `1px solid ${theme.border}`,
+            borderRadius: "6px",
+            padding: "12px",
+            backgroundColor: theme.surface,
+          };
+
+          return (
           <div key={source.sourceId} style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
               <Heading level={2} style={{ margin: 0 }}>Source {index + 1}</Heading>
@@ -931,99 +1022,12 @@ export const Setup: React.FC = () => {
             </div>
 
             <div style={{ marginTop: "8px" }}>
-              <Heading level={3} style={{ marginTop: 0, marginBottom: "8px" }}>Step 1: Upload Lookup CSV (Optional)</Heading>
-              {(() => {
-                const upload = state.uploadBySource[source.sourceId] || createDefaultUploadState();
-                return (
-                  <div style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "12px" }}>
-                    <Paragraph style={{ margin: "0 0 10px 0", color: theme.textSecondary, fontSize: "13px" }}>
-                      Skip this step if your lookup table is already populated by workflows or automation.
-                    </Paragraph>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "end" }}>
-                      <div>
-                        <label style={labelStyle}>CSV File</label>
-                        <input
-                          type="file"
-                          accept=".csv,text/csv"
-                          disabled={state.isSaving || upload.isUploading}
-                          onChange={(event) => handleLookupFileSelect(source, event.target.files?.[0] || null)}
-                        />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Lookup Key Column</label>
-                        <select
-                          style={{ ...inputStyle, fontFamily: "inherit" }}
-                          value={upload.lookupField}
-                          disabled={state.isSaving || upload.isUploading || upload.headers.length === 0}
-                          onChange={(event) => {
-                            const lookupField = event.target.value;
-                            setUploadState(source.sourceId, { lookupField });
-                            maybeAutofillUniqueApplicationColumn(source.sourceId, lookupField);
-                          }}
-                        >
-                          <option value="">Select key column...</option>
-                          {upload.headers.map((header) => (
-                            <option key={header} value={header}>{header}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+              <Heading level={3} style={{ marginTop: 0, marginBottom: "8px" }}>Step 1: Connect Lookup (choose A or B)</Heading>
+              <Paragraph style={{ margin: "0 0 12px 0", color: theme.textSecondary, fontSize: "13px" }}>
+                Complete <strong>one</strong> path — upload a CSV <strong>or</strong> point at an existing lookup — then Load Preview.
+              </Paragraph>
 
-                    <div style={{ marginTop: "8px" }}>
-                      <label style={labelStyle}>Upload Target Lookup Name</label>
-                      <input
-                        style={inputStyle}
-                        value={upload.uploadTargetName || source.lookupTableName}
-                        disabled={state.isSaving || upload.isUploading}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setUploadState(source.sourceId, { uploadTargetName: nextValue });
-                        }}
-                        placeholder="cmdb_businessapp"
-                      />
-                      <span style={hintStyle}>This lookup target is used for CSV upload and saved as the source table name.</span>
-                    </div>
-
-                    <div style={{ marginTop: "8px" }}>
-                      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", marginBottom: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={upload.overwrite}
-                          disabled={state.isSaving || upload.isUploading}
-                          onChange={(event) => setUploadState(source.sourceId, { overwrite: event.target.checked })}
-                        />
-                        Overwrite existing lookup table data
-                      </label>
-                    </div>
-
-                    <div style={{ marginTop: "8px", display: "flex", gap: "10px", alignItems: "center" }}>
-                      <Button
-                        variant="emphasized"
-                        disabled={state.isSaving || upload.isUploading || !upload.file || !upload.lookupField}
-                        onClick={() => uploadLookupFile(source)}
-                      >
-                        {upload.isUploading ? "Uploading..." : "Upload to Lookup"}
-                      </Button>
-                      <span style={{ fontSize: "12px", color: theme.textSecondary }}>
-                        Target: {toLookupPath((upload.uploadTargetName || source.lookupTableName).trim() || source.lookupTableName)}
-                      </span>
-                    </div>
-
-                    {upload.error && (
-                      <div style={{ marginTop: "8px", fontSize: "12px", color: theme.criticalText }}>{upload.error}</div>
-                    )}
-                    {upload.message && (
-                      <div style={{ marginTop: "8px", fontSize: "12px", color: theme.successText }}>{upload.message}</div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            <div style={{ marginTop: "16px" }}>
-              <Heading level={3} style={{ marginTop: 0, marginBottom: "10px" }}>Step 2: Configure Source</Heading>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
                 <div>
                   <label style={labelStyle}>Source Label</label>
                   <input
@@ -1033,33 +1037,201 @@ export const Setup: React.FC = () => {
                     onChange={(event) => updateSourceIdentity(source.sourceId, event.target.value, source.lookupTableName)}
                   />
                 </div>
-                <div>
-                  <label style={labelStyle}>Lookup Table Name</label>
-                  <input
-                    style={inputStyle}
-                    value={source.lookupTableName}
-                    disabled={state.isSaving}
-                    onChange={(event) => updateSourceIdentity(source.sourceId, source.label, event.target.value)}
-                  />
-                  <span style={hintStyle}>Use any lookup table name (for example: cmdb_businessapp or app_inventory).</span>
+                <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: "2px" }}>
+                  <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", marginBottom: 0 }}>
+                    <input
+                      type="radio"
+                      checked={state.defaultSourceId === source.sourceId}
+                      onChange={() => setState((prev) => ({ ...prev, defaultSourceId: source.sourceId, error: null }))}
+                      disabled={state.isSaving}
+                    />
+                    Use as default source
+                  </label>
                 </div>
               </div>
 
-              <div style={{ marginTop: "12px" }}>
-                <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px" }}>
-                  <input
-                    type="radio"
-                    checked={state.defaultSourceId === source.sourceId}
-                    onChange={() => setState((prev) => ({ ...prev, defaultSourceId: source.sourceId, error: null }))}
+              <div style={{ marginBottom: "14px" }}>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>
+                  Connection path
+                </div>
+                <div
+                  role="group"
+                  aria-label="Lookup connection path"
+                  style={{
+                    display: "flex",
+                    width: "100%",
+                    border: `1px solid ${theme.border}`,
+                    borderRadius: "6px",
+                    overflow: "hidden",
+                    backgroundColor: theme.surface,
+                  }}
+                >
+                  <button
+                    type="button"
+                    style={pathSegmentStyle(uploadActive, "left")}
                     disabled={state.isSaving}
-                  />
-                  Use as default source
-                </label>
+                    onClick={() => setSetupPath(source.sourceId, "upload")}
+                    aria-pressed={uploadActive}
+                  >
+                    <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.04em", marginBottom: "2px", opacity: pathEyebrowOpacity(uploadActive) }}>
+                      1A
+                    </div>
+                    Upload CSV
+                  </button>
+                  <button
+                    type="button"
+                    style={pathSegmentStyle(existingActive, "right")}
+                    disabled={state.isSaving}
+                    onClick={() => setSetupPath(source.sourceId, "existing")}
+                    aria-pressed={existingActive}
+                  >
+                    <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.04em", marginBottom: "2px", opacity: pathEyebrowOpacity(existingActive) }}>
+                      1B
+                    </div>
+                    Use existing lookup
+                  </button>
+                </div>
               </div>
+
+              {uploadActive ? (
+                <div
+                  style={{
+                    ...panelBase,
+                    borderColor: theme.primary,
+                    boxShadow: `inset 3px 0 0 ${theme.primary}`,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, marginBottom: "8px", color: theme.text }}>1A — Upload Lookup CSV</div>
+                  <Paragraph style={{ margin: "0 0 10px 0", color: theme.textSecondary, fontSize: "13px" }}>
+                    Use when the lookup table is not already populated by workflows or automation.
+                  </Paragraph>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "end" }}>
+                    <div>
+                      <label style={labelStyle}>CSV File</label>
+                      <input
+                        type="file"
+                        accept=".csv,text/csv"
+                        disabled={state.isSaving || upload.isUploading}
+                        onChange={(event) => handleLookupFileSelect(source, event.target.files?.[0] || null)}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Lookup Key Column</label>
+                      <select
+                        style={{ ...inputStyle, fontFamily: "inherit" }}
+                        value={upload.lookupField}
+                        disabled={state.isSaving || upload.isUploading || upload.headers.length === 0}
+                        onChange={(event) => {
+                          const lookupField = event.target.value;
+                          setUploadState(source.sourceId, { lookupField });
+                          maybeAutofillUniqueApplicationColumn(source.sourceId, lookupField);
+                        }}
+                      >
+                        <option value="">Select key column...</option>
+                        {upload.headers.map((header) => (
+                          <option key={header} value={header}>{header}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "8px" }}>
+                    <label style={labelStyle}>Upload Target Lookup Name</label>
+                    <input
+                      style={inputStyle}
+                      value={upload.uploadTargetName || source.lookupTableName}
+                      disabled={state.isSaving || upload.isUploading}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setUploadState(source.sourceId, { uploadTargetName: nextValue });
+                      }}
+                      placeholder="cmdb_businessapp"
+                    />
+                    <span style={hintStyle}>This lookup target is used for CSV upload and saved as the source table name.</span>
+                  </div>
+
+                  <div style={{ marginTop: "8px" }}>
+                    <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", marginBottom: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={upload.overwrite}
+                        disabled={state.isSaving || upload.isUploading}
+                        onChange={(event) => setUploadState(source.sourceId, { overwrite: event.target.checked })}
+                      />
+                      Overwrite existing lookup table data
+                    </label>
+                  </div>
+
+                  <div style={{ marginTop: "8px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                    <Button
+                      variant="emphasized"
+                      disabled={state.isSaving || upload.isUploading || !upload.file || !upload.lookupField}
+                      onClick={() => uploadLookupFile(source)}
+                    >
+                      {upload.isUploading ? "Uploading..." : "Upload to Lookup"}
+                    </Button>
+                    <span style={{ fontSize: "12px", color: theme.textSecondary }}>
+                      Target: {toLookupPath((upload.uploadTargetName || source.lookupTableName).trim() || source.lookupTableName)}
+                    </span>
+                  </div>
+
+                  {upload.error && (
+                    <div style={{ marginTop: "8px", fontSize: "12px", color: theme.criticalText }}>{upload.error}</div>
+                  )}
+                  {upload.message && (
+                    <div style={{ marginTop: "8px", fontSize: "12px", color: theme.successText }}>{upload.message}</div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    ...panelBase,
+                    borderColor: theme.primary,
+                    boxShadow: `inset 3px 0 0 ${theme.primary}`,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, marginBottom: "8px", color: theme.text }}>1B — Use Existing Lookup</div>
+                  <Paragraph style={{ margin: "0 0 10px 0", color: theme.textSecondary, fontSize: "13px" }}>
+                    Point at a lookup already populated (for example by Loop B / CMDB sync).
+                  </Paragraph>
+                  <div>
+                    <label style={labelStyle}>Lookup Table Name</label>
+                    <input
+                      style={inputStyle}
+                      value={source.lookupTableName}
+                      disabled={state.isSaving}
+                      onChange={(event) => updateSourceIdentity(source.sourceId, source.label, event.target.value)}
+                    />
+                    <span style={hintStyle}>Use any lookup table name (for example: cmdb_businessapp or app_inventory).</span>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: "12px", display: "flex", gap: "10px", alignItems: "center" }}>
+                <Button
+                  variant="emphasized"
+                  disabled={state.isSaving || !source.lookupTableName.trim()}
+                  onClick={() => runPreview(source)}
+                >
+                  Load Preview
+                </Button>
+                <span style={{ fontSize: "12px", color: theme.textSecondary }}>
+                  Loads a sample row from {toLookupPath(source.lookupTableName || "…")} to detect columns.
+                </span>
+              </div>
+
+              {state.previewBySource[source.sourceId] && (
+                <SourcePreview
+                  key={`${source.sourceId}-${state.previewBySource[source.sourceId].runId}`}
+                  request={state.previewBySource[source.sourceId]}
+                  source={source}
+                  onColumnsDetected={setDetectedColumns}
+                />
+              )}
             </div>
 
             <div style={{ marginTop: "16px" }}>
-              <Heading level={3} style={{ marginTop: 0, marginBottom: "10px" }}>Step 3: Field Mappings and Preview</Heading>
+              <Heading level={3} style={{ marginTop: 0, marginBottom: "10px" }}>Step 2: Field Mappings</Heading>
               <div style={{ display: "grid", gap: "10px" }}>
                 {source.fields.map((field) => (
                   <div key={field.id} style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "12px" }}>
@@ -1081,7 +1253,11 @@ export const Setup: React.FC = () => {
                           disabled={state.isSaving}
                           onChange={(event) => setField(source.sourceId, field.id, { sourceColumn: event.target.value })}
                           placeholder="column_name"
+                          title="Lookup column that uniquely identifies each application (join key)."
                         />
+                        {field.id === "uniqueApplicationId" && (
+                          <span style={hintStyle}>Lookup column that uniquely identifies each application (join key).</span>
+                        )}
                       </div>
                       <div>
                         <label style={labelStyle}>Format</label>
@@ -1089,6 +1265,7 @@ export const Setup: React.FC = () => {
                           style={{ ...inputStyle, fontFamily: "inherit" }}
                           value={field.format || "text"}
                           disabled={state.isSaving}
+                          title="How this value is displayed in tables. Does not affect joins."
                           onChange={(event) =>
                             setField(source.sourceId, field.id, {
                               format: event.target.value as "text" | "badge" | "pill",
@@ -1099,6 +1276,7 @@ export const Setup: React.FC = () => {
                           <option value="badge">badge</option>
                           <option value="pill">pill</option>
                         </select>
+                        <span style={hintStyle}>Display only (text / badge / pill). Does not affect joins.</span>
                       </div>
                       <div>
                         <Button
@@ -1121,30 +1299,20 @@ export const Setup: React.FC = () => {
                 <Button variant="default" disabled={state.isSaving} onClick={() => addField(source.sourceId)}>
                   Add Custom Field
                 </Button>
-                <Button variant="default" disabled={state.isSaving} onClick={() => runPreview(source)}>
-                  Load Preview
-                </Button>
               </div>
-
-              {state.previewBySource[source.sourceId] && (
-                <SourcePreview
-                  key={`${source.sourceId}-${state.previewBySource[source.sourceId].runId}`}
-                  request={state.previewBySource[source.sourceId]}
-                  source={source}
-                  onColumnsDetected={setDetectedColumns}
-                />
-              )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ marginTop: "20px", border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "18px" }}>
-        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 4: Application Join Variables</Heading>
-        <Paragraph style={{ margin: "0 0 14px 0", color: theme.textSecondary }}>
-          Choose the CMDB source first, run Load Preview for that source, then map join variables from detected columns.
+        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 3: Application Join Variables</Heading>
+        <Paragraph style={{ margin: "0 0 14px 0", color: theme.textSecondary, fontSize: "13px" }}>
+          Wire the Dynatrace-side Application ID expression to your lookup Unique Application ID. Name, owner, and tier are optional.
         </Paragraph>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <div style={{ fontSize: "12px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>Required</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
           <div>
             <label style={labelStyle}>CMDB Variable Source</label>
             <select
@@ -1159,7 +1327,7 @@ export const Setup: React.FC = () => {
                 </option>
               ))}
             </select>
-            <span style={hintStyle}>This source provides CMDB app metadata columns used in DQL joins.</span>
+            <span style={hintStyle}>Which lookup source supplies Application ID and optional enrichment columns.</span>
           </div>
 
           <div>
@@ -1171,20 +1339,23 @@ export const Setup: React.FC = () => {
               onChange={(event) => setApplicationVariable("dynatraceApplicationIdFieldPath", event.target.value)}
               placeholder="example: dt.cost.product or another DQL expression"
             />
-            <span style={hintStyle}>Use a DQL expression that resolves the Application ID. For host-tag setups, dt.cost.product is supported.</span>
+            <span style={hintStyle}>Required. How each Dynatrace entity exposes the same Application ID (join key).</span>
           </div>
 
           <div>
-            <label style={labelStyle}>CMDB Application ID Column (from Step 3)</label>
+            <label style={labelStyle}>CMDB Application ID Column (from Step 2)</label>
             <input
               style={inputStyle}
               value={derivedCmdbIdColumn}
               disabled
-              placeholder="Map Unique Application ID in Step 3"
+              placeholder="Map Unique Application ID in Step 2"
             />
-            <span style={hintStyle}>This value is automatically derived from Unique Application ID for the selected source.</span>
+            <span style={hintStyle}>Auto-filled from Unique Application ID Source Column in Step 2.</span>
           </div>
+        </div>
 
+        <div style={{ fontSize: "12px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>Optional enrichment</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
           <div>
             <label style={labelStyle}>CMDB Application Name Column</label>
             <select
@@ -1193,11 +1364,12 @@ export const Setup: React.FC = () => {
               disabled={state.isSaving}
               onChange={(event) => setApplicationVariable("cmdbApplicationNameColumn", event.target.value)}
             >
-              <option value="">Select column...</option>
+              <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
               {cmdbNameOptions.map((column) => (
                 <option key={column} value={column}>{column}</option>
               ))}
             </select>
+            <span style={hintStyle}>Optional. When ignored, the dashboard uses Application ID as the display name.</span>
           </div>
 
           <div>
@@ -1213,7 +1385,7 @@ export const Setup: React.FC = () => {
                 <option key={column} value={column}>{column}</option>
               ))}
             </select>
-            <span style={hintStyle}>Ignored by default. When ignored, Owner is hidden on the Application Dashboard.</span>
+            <span style={hintStyle}>Optional enrichment. Ignored columns are hidden on the dashboard.</span>
           </div>
 
           <div>
@@ -1229,7 +1401,7 @@ export const Setup: React.FC = () => {
                 <option key={column} value={column}>{column}</option>
               ))}
             </select>
-            <span style={hintStyle}>Ignored by default. When ignored, Tier is hidden on the Application Dashboard.</span>
+            <span style={hintStyle}>Optional enrichment for labels and risk context.</span>
           </div>
         </div>
         {selectedColumns.length === 0 && (
@@ -1240,7 +1412,7 @@ export const Setup: React.FC = () => {
       </div>
 
       <div style={{ marginTop: "20px", border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "18px" }}>
-        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 5: Telemetry Selection</Heading>
+        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 4: Telemetry Selection</Heading>
         <Paragraph style={{ margin: "0 0 14px 0", color: theme.textSecondary }}>
           Enable packs independently. Standard packs are Dynatrace-native. Feature packs add CMDB-backed context.
         </Paragraph>

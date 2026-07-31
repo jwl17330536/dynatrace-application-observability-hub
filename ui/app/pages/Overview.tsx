@@ -331,6 +331,9 @@ function buildFrontendApplicationsDataset(dynatraceApplicationIdFieldPath: strin
 }
 
 function buildCmdbApplicationsDataset(lookupPath: string, variables: ApplicationVariableConfig, cmdbAppIdColumn: string): string {
+  const nameExpression = isIgnoredColumnSelection(variables.cmdbApplicationNameColumn)
+    ? `toString(${quoteLookupColumn(cmdbAppIdColumn)})`
+    : `toString(${quoteLookupColumn(variables.cmdbApplicationNameColumn)})`;
   const ownerExpression = isIgnoredColumnSelection(variables.cmdbOwnerColumn)
     ? `""`
     : `toString(${quoteLookupColumn(variables.cmdbOwnerColumn)})`;
@@ -339,7 +342,7 @@ function buildCmdbApplicationsDataset(lookupPath: string, variables: Application
     : `toString(${quoteLookupColumn(variables.cmdbTierColumn)})`;
 
   return `load "${lookupPath}"
-| fieldsAdd cmdb_app_id = toString(${quoteLookupColumn(cmdbAppIdColumn)}), cmdb_app_name = toString(${quoteLookupColumn(variables.cmdbApplicationNameColumn)}), cmdb_owner = ${ownerExpression}, cmdb_tier = ${tierExpression}
+| fieldsAdd cmdb_app_id = toString(${quoteLookupColumn(cmdbAppIdColumn)}), cmdb_app_name = ${nameExpression}, cmdb_owner = ${ownerExpression}, cmdb_tier = ${tierExpression}
 | filter isNotNull(cmdb_app_id)
 | dedup cmdb_app_id`;
 }
@@ -878,8 +881,7 @@ function hasApplicationVariableConfig(variables: ApplicationVariableConfig | und
 
   return Boolean(
     variables.cmdbVariableSourceId?.trim() &&
-    variables.dynatraceApplicationIdFieldPath?.trim() &&
-    variables.cmdbApplicationNameColumn?.trim()
+    variables.dynatraceApplicationIdFieldPath?.trim()
   );
 }
 

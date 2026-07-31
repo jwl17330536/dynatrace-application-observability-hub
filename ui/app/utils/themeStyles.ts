@@ -9,7 +9,7 @@ export const theme = {
   border: "var(--dt-colors-theme-neutral-40)",
   text: "var(--dt-colors-theme-foreground-10)",
   textSecondary: "var(--dt-colors-theme-neutral-70)",
-  textMuted: "var(--dt-colors-theme-neutral-60)",
+  textMuted: "var(--dt-colors-theme-neutral-70)",
   textOnAccent: "var(--dt-colors-theme-foreground-20)",
   primary: "var(--dt-colors-theme-primary-70)",
   primaryText: "var(--dt-colors-theme-primary-90)",
