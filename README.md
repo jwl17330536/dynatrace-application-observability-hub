@@ -37,6 +37,9 @@ The app saves a lookup-only configuration with:
 
 ## Changelog
 
+### v0.1.75
+- **Synthetics inherit frontend map:** Monitors linked to a frontend now pick up client-side mappings (`name_id` / `hub_map`), not only DQL join_source/name_match. Mapping shows as `frontend_name_id` / `frontend_hub_map` / etc.
+
 ### v0.1.74
 - **Charts:** Replaced blank Strato plots with reliable HTML bars / CSS donuts + legends (Problems, Security, Signal mode, RUM mapping, diagnostics).
 - **Setup Step 3:** Callout documents Frontend→CMDB auto-mapping via `name__{application_id}`, tags, or RUM-tab map.

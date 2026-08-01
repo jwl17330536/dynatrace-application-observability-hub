@@ -1601,7 +1601,77 @@ function DashboardView({ config }: { config: MappingConfig }) {
     },
     [config, frontendEntityMaps]
   );
-  const experienceSyntheticRows = (experienceSyntheticsResult.data?.records || []) as ExperienceSyntheticRow[];
+  const experienceSyntheticRowsRaw = (experienceSyntheticsResult.data?.records || []) as ExperienceSyntheticRow[];
+  /** Inherit CMDB app from client-mapped frontends (name_id / hub_map) — DQL frontend lookup only has join_source/name_match. */
+  const experienceSyntheticRows = React.useMemo(() => {
+    const byFrontendId = new Map<string, ExperienceFrontendRow>();
+    const byClassicId = new Map<string, ExperienceFrontendRow>();
+    const byName = new Map<string, ExperienceFrontendRow>();
+    for (const fe of experienceFrontendRows) {
+      const id = String(fe.frontend_id || "").trim();
+      const classicId = String(fe.classic_id || "").trim();
+      const nameKey = String(fe.frontend_name || "")
+        .trim()
+        .toLowerCase();
+      if (id) {
+        byFrontendId.set(id, fe);
+      }
+      if (classicId) {
+        byClassicId.set(classicId, fe);
+      }
+      if (nameKey) {
+        byName.set(nameKey, fe);
+      }
+    }
+    const appNameById = new Map(cmdbAppOptions.map((o) => [o.id, o.name] as const));
+    const validAppIds = new Set(cmdbAppOptions.map((o) => o.id));
+
+    return experienceSyntheticRowsRaw.map((row) => {
+      const existingAppId = String(row.app_id || "").trim();
+      const existingMethod = String(row.mapping_method || "");
+      // Keep tag/join_source (and any already-resolved app) from DQL.
+      if (existingAppId && validAppIds.has(existingAppId) && existingMethod === "join_source") {
+        return row;
+      }
+
+      const frontendId = String(row.frontend_id || "").trim();
+      const frontendNameKey = String(row.frontend_name || "")
+        .trim()
+        .toLowerCase();
+      const linked =
+        (frontendId && byFrontendId.get(frontendId)) ||
+        (frontendId && byClassicId.get(frontendId)) ||
+        (frontendNameKey ? byName.get(frontendNameKey) : undefined);
+
+      const linkedAppId = String(linked?.app_id || "").trim();
+      if (linkedAppId && validAppIds.has(linkedAppId)) {
+        return {
+          ...row,
+          frontend_name: row.frontend_name || linked?.frontend_name,
+          app_id: linkedAppId,
+          app_name: linked?.app_name || appNameById.get(linkedAppId) || linkedAppId,
+          mapping_method:
+            linked?.mapping_method && linked.mapping_method !== "unmapped"
+              ? `frontend_${linked.mapping_method}`
+              : "frontend_map",
+        };
+      }
+
+      // Direct name_id on linked frontend display name (if frontend row missing from inventory merge).
+      const extracted = extractApplicationIdFromFrontendName(row.frontend_name);
+      if (extracted && validAppIds.has(extracted)) {
+        return {
+          ...row,
+          app_id: extracted,
+          app_name: appNameById.get(extracted) || extracted,
+          mapping_method: "frontend_name_id",
+        };
+      }
+
+      return row;
+    });
+  }, [experienceSyntheticRowsRaw, experienceFrontendRows, cmdbAppOptions]);
+
   const digitalHostRows = (digitalHostsResult.data?.records || []) as DigitalHostRow[];
   const rumSessionRows = !rumSessionsResult.error
     ? ((rumSessionsResult.data?.records || []) as RumSessionByFrontendRow[])
@@ -3428,7 +3498,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
         <div style={{ marginTop: "12px" }}>
           <WidgetCard
             title="Dynatrace Synthetics"
-            subtitle="All synthetic monitors. Join via Setup join sources (e.g. classic tag) or linked frontend. Select to filter hosts."
+            subtitle="All synthetic monitors. Join via Setup tags, or inherit CMDB app from the linked frontend (including name__id)."
             query={experienceSyntheticsQuery}
             isLoading={experienceSyntheticsResult.isLoading}
             error={experienceSyntheticsResult.error}
