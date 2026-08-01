@@ -203,13 +203,18 @@ ${cmdb}
     vulnerabilities_high = sum(is_high),
     vulnerabilities_medium = sum(is_medium),
     vulnerabilities_low = sum(is_low),
-    vulnerabilities_total = count(),
+    vulnerabilities_total = sum(is_critical) + sum(is_high) + sum(is_medium) + sum(is_low),
     by:{app_id, app_name, owner, tier}
 | fields app_id, app_name, owner, tier, vulnerabilities_critical, vulnerabilities_high, vulnerabilities_medium, vulnerabilities_low, vulnerabilities_total
 | sort vulnerabilities_critical desc, vulnerabilities_high desc, vulnerabilities_total desc, app_name asc
 | limit 500`;
 }
 
+/**
+ * Host-level open vulnerabilities. Hard | limit 1000 — UI gates the table behind
+ * application selection + Critical/High severity chips. At 10k+ hosts, follow-up:
+ * inject app_id into DQL and/or group-by-CVE instead of client-side full dumps.
+ */
 export function buildOpenVulnerabilitiesByHostQuery(
   dynatraceApplicationIdFieldPath: string,
   lookupPath: string,
@@ -626,8 +631,9 @@ fetch spans, from:now()-24h
  * Join client-side to mapped frontends via lower(frontend_name).
  */
 export function buildRumSessionsByFrontendNameQuery(): string {
+  // Prefer user.sessions; include null user_type. Fallback path uses estimated_count metric.
   return `fetch user.sessions, from:now()-24h
-| filter dt.rum.user_type == "real_user" OR isNull(dt.rum.user_type)
+| filter isNull(dt.rum.user_type) OR dt.rum.user_type == "real_user" OR dt.rum.user_type == "REAL_USER"
 | expand frontend_name = frontend.name
 | fieldsAdd frontend_name = toString(frontend_name), name_key = lower(toString(frontend_name))
 | filter isNotNull(name_key) AND name_key != "" AND name_key != "null"
@@ -637,5 +643,146 @@ export function buildRumSessionsByFrontendNameQuery(): string {
     by:{name_key, frontend_name}
 | fields name_key, frontend_name, sessions_24h, user_actions_24h
 | sort sessions_24h desc
+| limit 500`;
+}
+
+/** Fallback when user.sessions join fails — estimated active sessions by frontend.name (24h). */
+export function buildRumSessionsFallbackByFrontendNameQuery(): string {
+  return `timeseries {
+  sessions_24h = countDistinct(dt.frontend.session.active.estimated_count, scalar: true)
+},
+by: { frontend.name },
+from: now() - 24h
+| fieldsAdd
+    frontend_name = toString(frontend.name),
+    name_key = lower(toString(frontend.name)),
+    user_actions_24h = 0
+| filter isNotNull(name_key) AND name_key != "" AND name_key != "null"
+| fields name_key, frontend_name, sessions_24h, user_actions_24h
+| sort sessions_24h desc
+| limit 500`;
+}
+
+/** Host CPU / memory / availability scalars (2h) for Mission Control tables. */
+export function buildHostKpiScalarsQuery(): string {
+  return `timeseries {
+  cpu = avg(dt.host.cpu.usage, scalar: true),
+  memory = avg(dt.host.memory.usage, scalar: true),
+  avail_up = sum(dt.host.availability, scalar: true, default: 0, filter: { availability.state == "up" }),
+  avail_all = sum(dt.host.availability, scalar: true, default: 0)
+},
+by: { dt.entity.host },
+from: now() - 2h
+| fieldsAdd
+    host_id = toString(dt.entity.host),
+    host_name = entityName(dt.entity.host),
+    availability_pct = if(avail_all > 0, then: avail_up * 100.0 / avail_all, else: if(avail_up > 0, then: 100.0, else: 0.0))
+| fields host_id, host_name, cpu, memory, availability_pct
+| limit 500`;
+}
+
+/** Host CPU / memory series (2h) for Mission Control charts — average client-side by app hosts. */
+export function buildHostKpiSeriesQuery(): string {
+  return `timeseries {
+  cpu = avg(dt.host.cpu.usage),
+  memory = avg(dt.host.memory.usage)
+},
+by: { dt.entity.host },
+from: now() - 2h,
+interval: 10m
+| fieldsAdd host_id = toString(dt.entity.host)
+| fields host_id, cpu, memory
+| limit 500`;
+}
+
+/** Frontend RUM KPI scalars by frontend.name (24h). No user_type filter — many tenants omit it. */
+export function buildFrontendKpiScalarsQuery(): string {
+  return `timeseries {
+  sessions = countDistinct(dt.frontend.session.active.estimated_count, scalar: true),
+  actions = sum(dt.frontend.user_action.count, scalar: true),
+  action_ms = avg(dt.frontend.user_action.duration, scalar: true),
+  action_p75_ms = percentile(dt.frontend.user_action.duration, 75, scalar: true),
+  load_ms = avg(dt.frontend.web.navigation.load_event_end, scalar: true),
+  lcp_ms = avg(dt.frontend.web.page.largest_contentful_paint, scalar: true),
+  errors = sum(dt.frontend.error.count, scalar: true),
+  requests = sum(dt.frontend.request.count, scalar: true)
+},
+by: { frontend.name },
+from: now() - 24h
+| fieldsAdd
+    frontend_name = toString(frontend.name),
+    name_key = lower(toString(frontend.name)),
+    error_rate_pct = if(requests > 0, then: errors * 100.0 / requests, else: null)
+| filter isNotNull(name_key) AND name_key != "" AND name_key != "null"
+| fields name_key, frontend_name, sessions, actions, action_ms, action_p75_ms, load_ms, lcp_ms, error_rate_pct, errors, requests
+| limit 500`;
+}
+
+/** Frontend action duration series by frontend.name (24h) for charts. */
+export function buildFrontendKpiSeriesQuery(): string {
+  return `timeseries {
+  action_ms = avg(dt.frontend.user_action.duration),
+  sessions = countDistinct(dt.frontend.session.active.estimated_count)
+},
+by: { frontend.name },
+from: now() - 24h,
+interval: 1h
+| fieldsAdd name_key = lower(toString(frontend.name)), frontend_name = toString(frontend.name)
+| filter isNotNull(name_key) AND name_key != "" AND name_key != "null"
+| fields name_key, frontend_name, action_ms, sessions
+| limit 500`;
+}
+
+/** Synthetic browser + HTTP availability / duration scalars (24h). */
+export function buildSyntheticKpiScalarsQuery(): string {
+  return `timeseries {
+  availability = avg(dt.synthetic.browser.availability, scalar: true),
+  duration_ms = avg(dt.synthetic.browser.duration, scalar: true),
+  executions = sum(dt.synthetic.browser.executions, scalar: true)
+},
+by: { dt.entity.synthetic_test },
+from: now() - 24h
+| fieldsAdd
+    synthetic_id = toString(dt.entity.synthetic_test),
+    synthetic_name = entityName(dt.entity.synthetic_test),
+    kind = "browser"
+| fields synthetic_id, synthetic_name, kind, availability, duration_ms, executions
+| append [
+timeseries {
+  availability = avg(dt.synthetic.http.availability, scalar: true),
+  duration_ms = avg(dt.synthetic.http.duration, scalar: true),
+  executions = sum(dt.synthetic.http.executions, scalar: true)
+},
+by: { dt.entity.http_check },
+from: now() - 24h
+| fieldsAdd
+    synthetic_id = toString(dt.entity.http_check),
+    synthetic_name = entityName(dt.entity.http_check),
+    kind = "http"
+| fields synthetic_id, synthetic_name, kind, availability, duration_ms, executions
+]
+| limit 500`;
+}
+
+/** Synthetic availability series (browser + HTTP) for Mission Control charts. */
+export function buildSyntheticKpiSeriesQuery(): string {
+  return `timeseries {
+  availability = avg(dt.synthetic.browser.availability)
+},
+by: { dt.entity.synthetic_test },
+from: now() - 24h,
+interval: 1h
+| fieldsAdd synthetic_id = toString(dt.entity.synthetic_test)
+| fields synthetic_id, availability
+| append [
+timeseries {
+  availability = avg(dt.synthetic.http.availability)
+},
+by: { dt.entity.http_check },
+from: now() - 24h,
+interval: 1h
+| fieldsAdd synthetic_id = toString(dt.entity.http_check)
+| fields synthetic_id, availability
+]
 | limit 500`;
 }

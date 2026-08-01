@@ -155,7 +155,6 @@ function createDefaultFields(uniqueRequired: boolean): LookupFieldConfig[] {
       label: "Unique Application ID",
       sourceColumn: "",
       required: uniqueRequired,
-      format: "badge",
     },
   ];
 }
@@ -175,7 +174,6 @@ function createCustomField(): LookupFieldConfig {
     id,
     label: "Custom Field",
     sourceColumn: "",
-    format: "text",
   };
 }
 
@@ -1132,7 +1130,7 @@ export const Setup: React.FC = () => {
   }
 
   return (
-    <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "40px 24px" }}>
+    <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "40px 24px", backgroundColor: theme.pageBg, minHeight: "100%" }}>
       <Heading level={1}>Application Observability Hub</Heading>
 
       <div
@@ -1402,9 +1400,18 @@ export const Setup: React.FC = () => {
             <div style={{ marginTop: "16px" }}>
               <Heading level={3} style={{ marginTop: 0, marginBottom: "10px" }}>Step 2: Field Mappings</Heading>
               <div style={{ display: "grid", gap: "10px" }}>
-                {source.fields.map((field) => (
+                {source.fields.map((field) => {
+                  const sourceColumns = Array.from(
+                    new Set([
+                      ...(state.detectedColumnsBySource[source.sourceId] || []),
+                      ...(state.uploadBySource[source.sourceId]?.headers || []),
+                    ])
+                  ).sort((left, right) => left.localeCompare(right));
+                  const columnOptions = buildColumnOptions(sourceColumns, field.sourceColumn);
+                  const hasColumnChoices = columnOptions.length > 0;
+                  return (
                   <div key={field.id} style={{ border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "12px" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto", gap: "10px", alignItems: "end" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "10px", alignItems: "end" }}>
                       <div>
                         <label style={labelStyle}>Field Label</label>
                         <input
@@ -1416,36 +1423,25 @@ export const Setup: React.FC = () => {
                       </div>
                       <div>
                         <label style={labelStyle}>Source Column</label>
-                        <input
-                          style={inputStyle}
-                          value={field.sourceColumn}
-                          disabled={state.isSaving}
-                          onChange={(event) => setField(source.sourceId, field.id, { sourceColumn: event.target.value })}
-                          placeholder="column_name"
-                          title="Lookup column that uniquely identifies each application (join key)."
-                        />
-                        {field.id === "uniqueApplicationId" && (
-                          <span style={hintStyle}>Lookup column that uniquely identifies each application (join key).</span>
-                        )}
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Format</label>
                         <select
                           style={{ ...inputStyle, fontFamily: "inherit" }}
-                          value={field.format || "text"}
-                          disabled={state.isSaving}
-                          title="How this value is displayed in tables. Does not affect joins."
-                          onChange={(event) =>
-                            setField(source.sourceId, field.id, {
-                              format: event.target.value as "text" | "badge" | "pill",
-                            })
-                          }
+                          value={field.sourceColumn}
+                          disabled={state.isSaving || !hasColumnChoices}
+                          title="Lookup column from Load Preview / CSV headers."
+                          onChange={(event) => setField(source.sourceId, field.id, { sourceColumn: event.target.value })}
                         >
-                          <option value="text">text</option>
-                          <option value="badge">badge</option>
-                          <option value="pill">pill</option>
+                          <option value="">{hasColumnChoices ? "Select column…" : "Load Preview in Step 1 first"}</option>
+                          {columnOptions.map((column) => (
+                            <option key={column} value={column}>
+                              {column}
+                            </option>
+                          ))}
                         </select>
-                        <span style={hintStyle}>Display only (text / badge / pill). Does not affect joins.</span>
+                        <span style={hintStyle}>
+                          {field.id === "uniqueApplicationId"
+                            ? "Join key — from Load Preview / CSV headers."
+                            : "From Load Preview / CSV headers."}
+                        </span>
                       </div>
                       <div>
                         <Button
@@ -1461,7 +1457,8 @@ export const Setup: React.FC = () => {
                       <span style={hintStyle}>Required: map Unique Application ID in at least one source.</span>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div style={{ marginTop: "10px", display: "flex", gap: "10px" }}>

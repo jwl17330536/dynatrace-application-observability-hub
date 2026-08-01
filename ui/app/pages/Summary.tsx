@@ -95,7 +95,7 @@ export const Summary: React.FC = () => {
   const dtExpression = vars.dynatraceApplicationIdFieldPath?.trim() || "—";
 
   return (
-    <div style={{ padding: "32px", maxWidth: "960px", margin: "0 auto", position: "relative" }}>
+    <div style={{ padding: "32px", maxWidth: "960px", margin: "0 auto", position: "relative", backgroundColor: theme.pageBg, minHeight: "100%" }}>
       <div
         style={{
           position: "absolute",

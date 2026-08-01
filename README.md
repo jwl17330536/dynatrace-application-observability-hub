@@ -20,7 +20,7 @@ The app saves a lookup-only configuration with:
   - `sourceId`
   - `label`
   - `lookupTableName`
-  - `fields[]` (label, source column, format)
+  - `fields[]` (label, source column; optional legacy `format` ignored for joins)
 
 ## UI Flow
 
@@ -31,11 +31,32 @@ The app saves a lookup-only configuration with:
    - Set join variables (Dynatrace Application ID expression + optional name/owner/tier)
    - Enable telemetry packs independently
 3. Summary offers a primary Open Application Dashboard CTA.
-4. Overview (Application Dashboard) shows KPIs and pack widgets across tabs: **Summary**, **Signal**, **Problems**, **Security**, **Real User Monitoring**, **Data Health Status** (`?tab=` aliases: `digital`/`experience`→rum, `inventory`/`health`→summary, `data-health`→status).
+4. Overview (Application Dashboard) shows KPIs and pack widgets across tabs: **Summary**, **Mission Control**, **Signal**, **Problems**, **Security**, **Real User Monitoring**, **Data Health Status** (`?tab=` aliases: `digital`/`experience`→rum, `inventory`/`health`→summary, `data-health`→status).
 
-**Information architecture:** Summary is the portfolio rollup (counts/% from Signal, Problems, Security, RUM). Other tabs are deep dives. Data Health Status is meta (packs / capability), not CMDB portfolio.
+**Information architecture:** Summary is the portfolio rollup (counts/% from Signal, Problems, Security, RUM). Mission Control is the single-app deep dive (CMDB search + assets + timeseries KPIs). Other tabs are pack deep dives. Data Health Status is meta (packs / capability), not CMDB portfolio.
 
 ## Changelog
+
+### v0.1.78
+- **Scale-aware UX:** Rollups first, details on demand. Host finding dumps (Security, RUM Mapped Hosts) require application selection. Default Critical+High severity chips. Cap banners when DQL `| limit` truncates. Inventory sorted attention-first (In both / problems / hosts) so `| limit 500` no longer drops the important apps.
+- **Summary:** Renamed Signal Health → **Join coverage** (CMDB apps with ≥1 Dynatrace host / total). Merged Portfolio + Coverage into one inventory table. Missing enrichment shows `—` not `0`. KPI Query details removed; unmapped frontends banner jumps to RUM.
+- **Mission Control:** Frontend RUM KPIs/charts (relaxed user_type filter + session fallback); grouped KPIs; hide empty charts; vuln RiskBadge + Critical+High filter; chart trailing-null fix.
+- **Signal:** Trace gaps = eligible only (`service_count > 0` + no spans). Attention strip for Logs=NO / Traces=NO. Compact single-mode chip.
+- **Problems:** Application + category filters; bar click selects app; category donut from host rows; Mission Control jump.
+- **Security:** Gate host findings behind app select; RiskBadge + severity chips; Total = C+H+M+L (excludes NONE); stacked bar selects app.
+- **RUM:** Session query fallback via `dt.frontend.session.active.estimated_count`; distinguish query fail vs zero traffic; Mapped Hosts gated; unmapped-first + search; Sessions column.
+- **Data Health:** True eligible gap count + link to Signal; pack-live note uses success when 3/3 live; diagnostics inventory baseline + Logs/Spans coverage line.
+
+**Scale caveats (10k+ hosts):** Host vulnerability / evidence tables remain capped (`limit 1000` / `500`). Prefer app-scoped selection. Follow-ups: app-id injected DQL, group-by-CVE, HubDataTable virtualization, bulk frontend mapping.
+
+### v0.1.77
+- **Mission Control:** New tab after Summary — search by application_id / name / owner / tier; hero + KPI strip; host/frontend/synthetic timeseries charts; asset tables with Dynatrace deep links (hosts, frontends, synthetics, problems, vulns, services).
+- **Palette:** Retuned Strato theme tokens (pageBg, subtler borders), theme-aligned chart colors, softened filter panels; Setup/Summary/Overview use Dynatrace page background.
+
+### v0.1.76
+- **Setup Step 2:** Source Column is a dropdown from Load Preview / CSV headers; Format removed (display-only; missing `format` still renders as text).
+- **RUM Mapped Hosts:** Joins Signal host matrix (agent mode, traces/metrics/logs, spans, log count); Security-style Application filter chip + Clear.
+- **RUM coverage blind spots:** Per CMDB app with mapped frontends/synthetics — host counts, T/M/L N/M, and labels (`No hosts`, `Hosts but no traces`, `No RUM sessions`, `Healthy`).
 
 ### v0.1.75
 - **Synthetics inherit frontend map:** Monitors linked to a frontend now pick up client-side mappings (`name_id` / `hub_map`), not only DQL join_source/name_match. Mapping shows as `frontend_name_id` / `frontend_hub_map` / etc.

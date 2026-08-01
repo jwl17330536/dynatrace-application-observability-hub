@@ -40,10 +40,16 @@ export function ComparisonKpi({
   const safeNum = Number.isFinite(numerator) ? Math.max(0, numerator) : 0;
   const safeDen = Number.isFinite(denominator) ? Math.max(0, denominator) : 0;
   const ratio = safeDen > 0 ? safeNum / safeDen : 0;
-  const isHealthy = attention ? false : safeDen === 0 ? true : ratio >= healthyThreshold;
-  const valueColor = attention || (safeDen > 0 && !isHealthy) ? theme.criticalText : theme.successText;
-  const barColor = isHealthy ? "#2c8b57" : "#c33c54";
-  const pct = safeDen > 0 ? Math.max(2, Math.round(ratio * 100)) : 0;
+  // 0/0 is empty, not healthy green — use muted styling and a zero-width bar.
+  const isEmpty = safeDen === 0;
+  const isHealthy = attention ? false : isEmpty ? false : ratio >= healthyThreshold;
+  const valueColor = isEmpty
+    ? theme.textSecondary
+    : attention || !isHealthy
+      ? theme.criticalText
+      : theme.successText;
+  const barColor = isEmpty ? theme.chartMuted : isHealthy ? theme.chartSuccess : theme.chartCritical;
+  const pct = safeDen > 0 ? (ratio === 0 ? 0 : Math.max(2, Math.round(ratio * 100))) : 0;
 
   const htmlMeter = (
     <div style={{ height: "10px", borderRadius: "4px", backgroundColor: theme.surfaceSubtle, overflow: "hidden" }}>
