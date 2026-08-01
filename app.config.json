@@ -2,7 +2,7 @@
   "app": {
     "id": "my.application.observability.hub",
     "name": "Application Observability Hub",
-    "version": "0.1.61",
+    "version": "0.1.74",
     "description": "Multi-tenant hub app for application observability with flexible data sources",
     "scopes": [
       {
@@ -40,6 +40,26 @@
       {
         "name": "storage:metrics:read",
         "comment": "Read metrics/timeseries for Pack 1 log-status fallbacks"
+      },
+      {
+        "name": "storage:events:read",
+        "comment": "Read Davis problems/events for Problems tab rollups"
+      },
+      {
+        "name": "storage:security.events:read",
+        "comment": "Read RVA security.events for Vulnerabilities tab rollups"
+      },
+      {
+        "name": "storage:smartscape:read",
+        "comment": "Optional Smartscape FRONTEND merge for Real User Monitoring"
+      },
+      {
+        "name": "storage:user.sessions:read",
+        "comment": "Read Gen3 RUM user.sessions for Summary session and action counts"
+      },
+      {
+        "name": "storage:user.events:read",
+        "comment": "Read Gen3 RUM user.events for future Real User Monitoring deep dive"
       }
     ]
   },

@@ -210,12 +210,28 @@ Required join keys:
 1. **Unique Application ID** mapped in Step 2 (lookup column)
 2. **Dynatrace Application ID expression** (for example `dt.cost.product`)
 
+CMDB Loop B provides only four columns: `application_id`, `application_name`, `cmdb_owner`, `tier`. Do not expect server/RUM fields from cmdb-app.
+
 Optional enrichment (Name, Owner, Tier) may be set to **Ignore**. Dropdown options for those fields are filled from:
 
 - **Load Preview** on the selected CMDB source (a non-empty sample row), and/or
 - **CSV headers** when using Step 1A upload
 
 If you only see Ignore, run Load Preview again on the source selected under **CMDB Variable Source**. Empty preview results no longer clear previously detected columns (v0.1.57+).
+
+**Dynatrace Application ID mappings:** In Setup Step 3, click **Add Dynatrace Mapping**, choose **Classic entity tag**, **Primary Grail field**, or **Primary Grail tag**, then enter the expression (e.g. `dt.cost.product` or `application_id`). Check **Use for** Hosts / Applications / Synthetics. Add another mapping for each additional Dynatrace tag or field. At least one mapping must apply to Hosts (usually Primary Grail field `dt.cost.product`). Real User Monitoring join priority: Setup join source → hub RUM-tab map → **display-name id extract** (`frontendName__{application_id}` or `{application_id}_name`) → exact name match. RUM shows `mapping_method` (`join_source` / `hub_map` / `name_id` / `name_match` / `unmapped`).
+
+**Problems / Security tabs** need app scopes `storage:events:read` and `storage:security.events:read` (plus user IAM). Data rolls up through hosts tagged with `dt.cost.product` matching `application_id`.
+
+**RUM → CMDB rule:** Prefer tagging frontends with the **same Application ID** as hosts, **or** rename the frontend display name to end with `__{application_id}` (example: `homeassistant__5805`), **or** map each frontend on the Real User Monitoring tab. Exact name-match only works when frontend name equals CMDB application name.
+
+**Sessions / actions:** Hub rolls `user.sessions` by `frontend.name` → mapped frontend → CMDB `application_id`. After a rename, **new** sessions that emit the new name attach to that app; older session rows may keep the previous name until they age out. Session replay UI stays in Experience Vitals (hub does not embed replays).
+
+**Optional OpenPipeline hardening:** Enrich `user.sessions` / `user.events` at ingest with `application_id` (or `dt.cost.product`) parsed from `frontend.name` via `__(\d+)$`, so Grail joins do not depend on hub-side name parsing.
+
+**RUM inventory / Smartscape:** The RUM tab loads bare `smartscapeNodes FRONTEND` (Experience Explorer list) and unions classic `dt.entity.application` / mobile / custom. If you only see a handful of classic `APPLICATION-*` rows, approve `storage:smartscape:read` and hard-refresh app permissions. Subtitle shows `Smartscape: N · Classic: M · Merged: K`.
+
+**RUM session counts / Smartscape** need `storage:user.sessions:read` and `storage:smartscape:read` — re-approve app permissions after deploy when those scopes are added.
 
 ---
 

@@ -10,7 +10,15 @@ import {
   mergeFeaturePacks,
   saveConfig,
   validateConfig,
+  seedEntityJoinSourcesFromPrimary,
+  resolvePrimaryFromJoinSources,
+  defaultAppliesToForKind,
+  placeholderForJoinKind,
+  labelForJoinKind,
   type ApplicationVariableConfig,
+  type EntityJoinAppliesTo,
+  type EntityJoinSource,
+  type EntityJoinSourceKind,
   type FeaturePackConfig,
   type FeaturePacksConfig,
   type LookupSourceConfig,
@@ -18,6 +26,8 @@ import {
   type LookupFieldConfig,
 } from "@utils/documentStore";
 import { theme } from "@utils/themeStyles";
+
+const JOIN_KIND_OPTIONS: EntityJoinSourceKind[] = ["classic_tag", "grail_field", "grail_tag"];
 
 interface PreviewRequest {
   query: string;
@@ -74,10 +84,11 @@ const labelStyle: React.CSSProperties = {
 
 const hintStyle: React.CSSProperties = {
   fontSize: "12px",
-  color: theme.textSecondary,
+  color: theme.text,
   marginTop: "4px",
   display: "block",
   lineHeight: 1.45,
+  opacity: 0.92,
 };
 
 /** Dynatrace-style segmented toggle: connected halves, primary fill when selected. */
@@ -102,6 +113,16 @@ function pathSegmentStyle(active: boolean, side: "left" | "right"): React.CSSPro
 
 function pathEyebrowOpacity(active: boolean): number {
   return active ? 1 : 0.8;
+}
+
+function joinExpressionHint(kind: EntityJoinSourceKind): string {
+  if (kind === "classic_tag") {
+    return "Tag key before the colon (e.g. application_id for tags application_id:5805).";
+  }
+  if (kind === "grail_field") {
+    return "Grail / cost field name (example placeholder: dt.cost.product). Enter your actual field.";
+  }
+  return "Grail tag key under primary_tags (e.g. application_id).";
 }
 
 function slugify(value: string): string {
@@ -250,12 +271,12 @@ const FEATURE_PACK_META: Record<FeaturePackId, { title: string; summary: string 
     summary: "Signal evidence and quality views using Dynatrace-native telemetry data.",
   },
   problemsAndAlerts: {
-    title: "Standard Pack 2: Problems & Alerts",
-    summary: "Active and historical problem rollups from Dynatrace problem and event datasets.",
+    title: "Standard Pack 2: Problems",
+    summary: "Active Davis problems rolled up by host → dt.cost.product → application_id.",
   },
   vulnerabilities: {
     title: "Standard Pack 3: Vulnerabilities",
-    summary: "Security rollups (critical/high/total) from Dynatrace vulnerability entities.",
+    summary: "Open Runtime Vulnerability Analytics findings rolled up by host → application_id.",
   },
   infrastructureCoverage: {
     title: "Feature Pack 1: Infrastructure Coverage",
@@ -381,6 +402,9 @@ function getFeaturePackReadiness(packId: FeaturePackId, pack: FeaturePackConfig)
 export const Setup: React.FC = () => {
   const navigate = useNavigate();
   const [previewRunCounter, setPreviewRunCounter] = useState(0);
+  const [showMappingKindPicker, setShowMappingKindPicker] = useState(false);
+  const [showOptionalEnrichment, setShowOptionalEnrichment] = useState(false);
+  const [showAdvancedRumLookup, setShowAdvancedRumLookup] = useState(false);
   const [state, setState] = useState<SetupState>({
     sources: [DEFAULT_SOURCE],
     defaultSourceId: DEFAULT_SOURCE.sourceId,
@@ -416,6 +440,12 @@ export const Setup: React.FC = () => {
             ...getDefaultApplicationVariables(),
             ...(existing.applicationVariables || {}),
           };
+          const seededJoinSources = seedEntityJoinSourcesFromPrimary(
+            mergedVariables.entityJoinSources,
+            mergedVariables.dynatraceApplicationIdFieldPath
+          );
+          const syncedPrimary =
+            resolvePrimaryFromJoinSources(seededJoinSources) || mergedVariables.dynatraceApplicationIdFieldPath;
 
           const setupPathBySource = Object.fromEntries(
             existingSources.map((source) => [source.sourceId, "existing" as SourceSetupPath])
@@ -437,6 +467,8 @@ export const Setup: React.FC = () => {
                   existingSources.find((source) => source.sourceId === (mergedVariables.cmdbVariableSourceId || existingDefaultSource)) ||
                     existingSources[0]
                 ) || mergedVariables.cmdbApplicationIdColumn,
+              entityJoinSources: seededJoinSources,
+              dynatraceApplicationIdFieldPath: syncedPrimary,
             },
             uploadBySource: {},
             setupPathBySource,
@@ -533,6 +565,111 @@ export const Setup: React.FC = () => {
         [key]: value,
       },
     }));
+  };
+
+  const setEntityJoinSources = (sources: EntityJoinSource[]) => {
+    const syncedPrimary = resolvePrimaryFromJoinSources(sources);
+    setState((prev) => ({
+      ...prev,
+      error: null,
+      applicationVariables: {
+        ...prev.applicationVariables,
+        entityJoinSources: sources,
+        dynatraceApplicationIdFieldPath:
+          syncedPrimary || prev.applicationVariables.dynatraceApplicationIdFieldPath,
+      },
+    }));
+  };
+
+  const addEntityJoinSource = (kind: EntityJoinSourceKind) => {
+    const next: EntityJoinSource = {
+      id: `join-${Date.now().toString(36)}`,
+      kind,
+      key: "",
+      appliesTo: defaultAppliesToForKind(kind),
+      label: "",
+    };
+    setEntityJoinSources([...(state.applicationVariables.entityJoinSources || []), next]);
+    setShowMappingKindPicker(false);
+  };
+
+  /** Blank host mapping — never prefills dt.cost.product; placeholder is example-only. */
+  const addBlankHostMapping = () => {
+    const next: EntityJoinSource = {
+      id: `join-host-${Date.now().toString(36)}`,
+      kind: "grail_field",
+      key: "",
+      appliesTo: ["host"],
+      label: "",
+    };
+    setEntityJoinSources([...(state.applicationVariables.entityJoinSources || []), next]);
+  };
+
+  const addApplicationMappingSameAsHosts = () => {
+    const hostSource = (state.applicationVariables.entityJoinSources || []).find(
+      (s) => s.appliesTo.includes("host") && (s.key || "").trim()
+    );
+    if (!hostSource) {
+      return;
+    }
+    const existingApp = (state.applicationVariables.entityJoinSources || []).find(
+      (s) =>
+        s.kind === hostSource.kind &&
+        (s.key || "").trim() === hostSource.key.trim() &&
+        s.appliesTo.includes("application")
+    );
+    if (existingApp) {
+      if (!existingApp.appliesTo.includes("application")) {
+        toggleJoinAppliesTo(existingApp.id, "application");
+      }
+      return;
+    }
+    // Prefer extending the host mapping to also apply to Applications when keys match.
+    if (!hostSource.appliesTo.includes("application")) {
+      setEntityJoinSources(
+        (state.applicationVariables.entityJoinSources || []).map((source) =>
+          source.id === hostSource.id
+            ? { ...source, appliesTo: [...source.appliesTo, "application" as const] }
+            : source
+        )
+      );
+      return;
+    }
+  };
+
+  const updateEntityJoinSource = (id: string, patch: Partial<EntityJoinSource>) => {
+    const current = state.applicationVariables.entityJoinSources || [];
+    const next = current.map((source) => {
+      if (source.id !== id) {
+        return source;
+      }
+      const updated = { ...source, ...patch };
+      if (patch.kind && patch.kind !== source.kind && !patch.appliesTo) {
+        updated.appliesTo = defaultAppliesToForKind(patch.kind);
+      }
+      return updated;
+    });
+    setEntityJoinSources(next);
+  };
+
+  const removeEntityJoinSource = (id: string) => {
+    setEntityJoinSources((state.applicationVariables.entityJoinSources || []).filter((source) => source.id !== id));
+  };
+
+  const toggleJoinAppliesTo = (id: string, family: EntityJoinAppliesTo) => {
+    const current = state.applicationVariables.entityJoinSources || [];
+    setEntityJoinSources(
+      current.map((source) => {
+        if (source.id !== id) {
+          return source;
+        }
+        const has = source.appliesTo.includes(family);
+        return {
+          ...source,
+          appliesTo: has ? source.appliesTo.filter((item) => item !== family) : [...source.appliesTo, family],
+        };
+      })
+    );
   };
 
   const setFeaturePack = (packId: FeaturePackId, patch: Partial<FeaturePackConfig>) => {
@@ -697,6 +834,9 @@ export const Setup: React.FC = () => {
 
     try {
       const derivedIdColumn = getUniqueApplicationIdColumn(selectedCmdbSource);
+      const joinSources = state.applicationVariables.entityJoinSources || [];
+      const syncedPrimary =
+        resolvePrimaryFromJoinSources(joinSources) || state.applicationVariables.dynatraceApplicationIdFieldPath;
       const config: MappingConfig = {
         mode: "lookup",
         defaultSourceId: state.defaultSourceId,
@@ -705,6 +845,8 @@ export const Setup: React.FC = () => {
         applicationVariables: {
           ...state.applicationVariables,
           cmdbApplicationIdColumn: derivedIdColumn,
+          entityJoinSources: joinSources,
+          dynatraceApplicationIdFieldPath: syncedPrimary,
         },
       };
 
@@ -1004,8 +1146,9 @@ export const Setup: React.FC = () => {
       >
         <div style={{ fontWeight: 700, color: theme.text, marginBottom: "8px" }}>Prerequisites</div>
         <Paragraph style={{ margin: "0 0 6px 0", color: theme.textSecondary, fontSize: "13px" }}>
-          <strong>Required join keys:</strong> (1) a unique Application ID column in your lookup, and (2) a Dynatrace
-          Application ID expression on entities (for example <code>dt.cost.product</code>).
+          <strong>Required join keys:</strong> (1) a unique Application ID column in your lookup, and (2) at least one
+          Dynatrace Application ID mapping that applies to Hosts (for example Primary Grail field{" "}
+          <code>dt.cost.product</code>). Add more mappings for Applications / Synthetics as needed.
         </Paragraph>
         <Paragraph style={{ margin: "0 0 6px 0", color: theme.textSecondary, fontSize: "13px" }}>
           <strong>Optional enrichment:</strong> application name, owner, and tier (can be ignored).
@@ -1333,14 +1476,14 @@ export const Setup: React.FC = () => {
       </div>
 
       <div style={{ marginTop: "20px", border: `1px solid ${theme.border}`, borderRadius: "6px", padding: "18px" }}>
-        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 3: Application Join Variables</Heading>
-        <Paragraph style={{ margin: "0 0 14px 0", color: theme.textSecondary, fontSize: "13px" }}>
-          Wire the Dynatrace-side Application ID expression to your lookup Unique Application ID. Name, owner, and tier are optional.
+        <Heading level={2} style={{ marginTop: 0, marginBottom: "8px" }}>Step 3: Join Dynatrace → CMDB</Heading>
+        <Paragraph style={{ margin: "0 0 14px 0", color: theme.text, fontSize: "13px" }}>
+          Do these in order. Hosts are required. RUM needs the same Application ID on frontends (or map in the RUM tab).
         </Paragraph>
-        <div style={{ fontSize: "12px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>Required</div>
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
           <div>
-            <label style={labelStyle}>CMDB Variable Source</label>
+            <label style={labelStyle}>1. CMDB source</label>
             <select
               style={{ ...inputStyle, fontFamily: "inherit" }}
               value={state.applicationVariables.cmdbVariableSourceId}
@@ -1353,87 +1496,334 @@ export const Setup: React.FC = () => {
                 </option>
               ))}
             </select>
-            <span style={hintStyle}>Which lookup source supplies Application ID and optional enrichment columns.</span>
           </div>
-
           <div>
-            <label style={labelStyle}>Dynatrace Application ID Expression</label>
-            <input
-              style={inputStyle}
-              value={state.applicationVariables.dynatraceApplicationIdFieldPath}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("dynatraceApplicationIdFieldPath", event.target.value)}
-              placeholder="example: dt.cost.product or another DQL expression"
-            />
-            <span style={hintStyle}>Required. How each Dynatrace entity exposes the same Application ID (join key).</span>
-          </div>
-
-          <div>
-            <label style={labelStyle}>CMDB Application ID Column (from Step 2)</label>
-            <input
-              style={inputStyle}
-              value={derivedCmdbIdColumn}
-              disabled
-              placeholder="Map Unique Application ID in Step 2"
-            />
-            <span style={hintStyle}>Auto-filled from Unique Application ID Source Column in Step 2.</span>
+            <label style={labelStyle}>Application ID column</label>
+            <input style={inputStyle} value={derivedCmdbIdColumn} disabled placeholder="Map Unique Application ID in Step 2" />
           </div>
         </div>
 
-        <div style={{ fontSize: "12px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>Optional enrichment</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-          <div>
-            <label style={labelStyle}>CMDB Application Name Column</label>
-            <select
-              style={{ ...inputStyle, fontFamily: "inherit" }}
-              value={state.applicationVariables.cmdbApplicationNameColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbApplicationNameColumn", event.target.value)}
+        <div
+          style={{
+            border: `1px solid ${resolvePrimaryFromJoinSources(state.applicationVariables.entityJoinSources) ? theme.border : theme.primary}`,
+            borderRadius: "6px",
+            padding: "14px",
+            marginBottom: "12px",
+            backgroundColor: theme.surfaceSubtle,
+          }}
+        >
+          <div style={{ fontSize: "13px", fontWeight: 700, color: theme.text, marginBottom: "6px" }}>
+            2. Required — Dynatrace mappings (Hosts)
+          </div>
+          <Paragraph style={{ margin: "0 0 10px 0", color: theme.text, fontSize: "13px" }}>
+            Add at least one mapping that applies to <strong>Hosts</strong>. Enter your own field or tag key — nothing is
+            pre-filled. Placeholders are examples only.
+          </Paragraph>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+            <Button type="button" variant="emphasized" disabled={state.isSaving} onClick={addBlankHostMapping}>
+              Add host mapping
+            </Button>
+            <Button type="button" variant="default" disabled={state.isSaving} onClick={() => setShowMappingKindPicker(true)}>
+              Add mapping…
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={
+                state.isSaving ||
+                !(state.applicationVariables.entityJoinSources || []).some(
+                  (s) => s.appliesTo.includes("host") && (s.key || "").trim()
+                )
+              }
+              onClick={addApplicationMappingSameAsHosts}
             >
-              <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
-              {cmdbNameOptions.map((column) => (
-                <option key={column} value={column}>{column}</option>
-              ))}
-            </select>
-            <span style={hintStyle}>Optional. When ignored, the dashboard uses Application ID as the display name.</span>
+              Also use for Applications
+            </Button>
+          </div>
+          <Paragraph style={{ margin: "0 0 10px 0", color: theme.text, fontSize: "12px" }}>
+            For RUM: check <strong>Applications</strong> on a mapping (same key as hosts if you tag frontends), or map
+            frontends on the Real User Monitoring tab.
+          </Paragraph>
+
+          <div
+            style={{
+              border: `1px solid ${theme.primary}`,
+              borderRadius: "6px",
+              padding: "12px",
+              backgroundColor: theme.surface,
+              marginBottom: "12px",
+            }}
+          >
+            <div style={{ fontSize: "13px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>
+              How frontends map to CMDB apps (automatic)
+            </div>
+            <ol style={{ margin: 0, paddingLeft: "18px", color: theme.text, fontSize: "13px", lineHeight: 1.5 }}>
+              <li style={{ marginBottom: "6px" }}>
+                <strong>Automatic (recommended for scale):</strong> In Experience → Frontends → Settings, rename the display
+                name to <code>anyLabel__{"{application_id}"}</code> (example <code>homeassistant__5805</code>). The hub
+                sets <code>mapping_method: name_id</code>. Also accepts <code>{"{application_id}"}_name</code> (example{" "}
+                <code>5805_homeassistant</code>).
+              </li>
+              <li style={{ marginBottom: "6px" }}>
+                <strong>Tag:</strong> Put the same Application ID on the frontend as on hosts (classic/Grail tag), and check{" "}
+                <strong>Applications</strong> on that mapping above.
+              </li>
+              <li>
+                <strong>Manual:</strong> On the Real User Monitoring tab, pick a CMDB app per frontend (
+                <code>hub_map</code>).
+              </li>
+            </ol>
+            <Paragraph style={{ margin: "8px 0 0 0", color: theme.textSecondary, fontSize: "12px" }}>
+              Approve <code>storage:smartscape:read</code> so Experience FRONTEND inventory appears (not classic-only).
+              Sessions/actions roll up via <code>frontend.name</code> once the frontend is mapped.
+            </Paragraph>
           </div>
 
-          <div>
-            <label style={labelStyle}>CMDB Owner Column</label>
-            <select
-              style={{ ...inputStyle, fontFamily: "inherit" }}
-              value={state.applicationVariables.cmdbOwnerColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbOwnerColumn", event.target.value)}
-            >
-              <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
-              {cmdbOwnerOptions.map((column) => (
-                <option key={column} value={column}>{column}</option>
-              ))}
-            </select>
-            <span style={hintStyle}>Optional enrichment. Ignored columns are hidden on the dashboard.</span>
+          {(state.applicationVariables.entityJoinSources || []).length === 0 && !showMappingKindPicker && (
+            <Paragraph style={{ margin: "0 0 10px 0", color: theme.text, fontSize: "13px", fontWeight: 600 }}>
+              No mappings yet. Click <strong>Add host mapping</strong> or <strong>Add mapping…</strong>.
+            </Paragraph>
+          )}
+
+          <div style={{ display: "grid", gap: "10px" }}>
+            {(state.applicationVariables.entityJoinSources || []).map((source, index) => (
+              <div
+                key={source.id}
+                style={{
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: "6px",
+                  padding: "12px",
+                  backgroundColor: theme.surface,
+                  display: "grid",
+                  gap: "10px",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700, color: theme.text, fontSize: "13px" }}>
+                    Mapping {index + 1}: {labelForJoinKind(source.kind)}
+                    {(source.key || "").trim() ? ` · ${source.key.trim()}` : " · (enter key below)"}
+                  </div>
+                  <Button type="button" variant="default" disabled={state.isSaving} onClick={() => removeEntityJoinSource(source.id)}>
+                    Remove
+                  </Button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: "10px" }}>
+                  <div>
+                    <label style={labelStyle}>Kind</label>
+                    <select
+                      style={{ ...inputStyle, fontFamily: "inherit" }}
+                      value={source.kind}
+                      disabled={state.isSaving}
+                      onChange={(event) =>
+                        updateEntityJoinSource(source.id, { kind: event.target.value as EntityJoinSourceKind })
+                      }
+                    >
+                      {JOIN_KIND_OPTIONS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {labelForJoinKind(kind)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>
+                      {source.kind === "classic_tag" ? "Tag key" : "Expression"}
+                    </label>
+                    <input
+                      style={inputStyle}
+                      value={source.key}
+                      disabled={state.isSaving}
+                      onChange={(event) => updateEntityJoinSource(source.id, { key: event.target.value })}
+                      placeholder={placeholderForJoinKind(source.kind)}
+                      autoComplete="off"
+                    />
+                    <span style={hintStyle}>{joinExpressionHint(source.kind)}</span>
+                  </div>
+                </div>
+                <div>
+                  <label style={labelStyle}>Use for</label>
+                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                    {(
+                      [
+                        { id: "host" as const, label: "Hosts" },
+                        { id: "application" as const, label: "Applications" },
+                        { id: "synthetic" as const, label: "Synthetics" },
+                      ] as const
+                    ).map((family) => (
+                      <label
+                        key={family.id}
+                        style={{
+                          ...labelStyle,
+                          marginBottom: 0,
+                          fontWeight: 500,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={source.appliesTo.includes(family.id)}
+                          disabled={state.isSaving}
+                          onChange={() => toggleJoinAppliesTo(source.id, family.id)}
+                        />
+                        {family.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
 
-          <div>
-            <label style={labelStyle}>CMDB Tier Column</label>
-            <select
-              style={{ ...inputStyle, fontFamily: "inherit" }}
-              value={state.applicationVariables.cmdbTierColumn}
-              disabled={state.isSaving}
-              onChange={(event) => setApplicationVariable("cmdbTierColumn", event.target.value)}
+          {showMappingKindPicker && (
+            <div
+              style={{
+                marginTop: "12px",
+                border: `1px solid ${theme.primary}`,
+                borderRadius: "6px",
+                padding: "14px",
+                backgroundColor: theme.surface,
+              }}
             >
-              <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
-              {cmdbTierOptions.map((column) => (
-                <option key={column} value={column}>{column}</option>
-              ))}
-            </select>
-            <span style={hintStyle}>Optional enrichment for labels and risk context.</span>
-          </div>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: theme.text, marginBottom: "8px" }}>
+                Choose mapping type
+              </div>
+              <Paragraph style={{ margin: "0 0 10px 0", color: theme.text, fontSize: "13px" }}>
+                Then enter your key/expression in the card that appears.
+              </Paragraph>
+              <div style={{ display: "grid", gap: "8px" }}>
+                {JOIN_KIND_OPTIONS.map((kind) => (
+                  <Button
+                    key={kind}
+                    type="button"
+                    variant="emphasized"
+                    disabled={state.isSaving}
+                    onClick={() => addEntityJoinSource(kind)}
+                  >
+                    {labelForJoinKind(kind)}
+                  </Button>
+                ))}
+              </div>
+              <div style={{ marginTop: "10px" }}>
+                <Button type="button" variant="default" disabled={state.isSaving} onClick={() => setShowMappingKindPicker(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!resolvePrimaryFromJoinSources(state.applicationVariables.entityJoinSources) && (
+            <Paragraph style={{ marginTop: "10px", color: theme.text, fontSize: "13px", fontWeight: 600 }}>
+              At least one mapping must apply to Hosts and have a non-empty key/expression.
+            </Paragraph>
+          )}
         </div>
+        <button
+          type="button"
+          onClick={() => setShowOptionalEnrichment((prev) => !prev)}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: theme.primaryText,
+            fontWeight: 600,
+            fontSize: "13px",
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: "8px",
+          }}
+        >
+          {showOptionalEnrichment ? "▾" : "▸"} 3. Optional — Name / Owner / Tier columns
+        </button>
+        {showOptionalEnrichment && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+            <div>
+              <label style={labelStyle}>CMDB Application Name Column</label>
+              <select
+                style={{ ...inputStyle, fontFamily: "inherit" }}
+                value={state.applicationVariables.cmdbApplicationNameColumn}
+                disabled={state.isSaving}
+                onChange={(event) => setApplicationVariable("cmdbApplicationNameColumn", event.target.value)}
+              >
+                <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
+                {cmdbNameOptions.map((column) => (
+                  <option key={column} value={column}>
+                    {column}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>CMDB Owner Column</label>
+              <select
+                style={{ ...inputStyle, fontFamily: "inherit" }}
+                value={state.applicationVariables.cmdbOwnerColumn}
+                disabled={state.isSaving}
+                onChange={(event) => setApplicationVariable("cmdbOwnerColumn", event.target.value)}
+              >
+                <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
+                {cmdbOwnerOptions.map((column) => (
+                  <option key={column} value={column}>
+                    {column}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>CMDB Tier Column</label>
+              <select
+                style={{ ...inputStyle, fontFamily: "inherit" }}
+                value={state.applicationVariables.cmdbTierColumn}
+                disabled={state.isSaving}
+                onChange={(event) => setApplicationVariable("cmdbTierColumn", event.target.value)}
+              >
+                <option value={IGNORE_COLUMN_VALUE}>Ignore</option>
+                {cmdbTierOptions.map((column) => (
+                  <option key={column} value={column}>
+                    {column}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setShowAdvancedRumLookup((prev) => !prev)}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: theme.primaryText,
+            fontWeight: 600,
+            fontSize: "13px",
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: "8px",
+            display: "block",
+          }}
+        >
+          {showAdvancedRumLookup ? "▾" : "▸"} Advanced — frontend lookup table name
+        </button>
+        {showAdvancedRumLookup && (
+          <div style={{ marginBottom: "8px" }}>
+            <input
+              style={inputStyle}
+              value={state.applicationVariables.frontendMappingLookupName || ""}
+              disabled={state.isSaving}
+              onChange={(event) => setApplicationVariable("frontendMappingLookupName", event.target.value)}
+              placeholder="Leave blank — prefer RUM-tab map or Dynatrace tags"
+            />
+            <span style={hintStyle}>
+              Optional Grail lookup with <code>application_id</code>, <code>frontend_entity_id</code>. Prefer mapping on
+              the RUM tab.
+            </span>
+          </div>
+        )}
+
         {selectedColumns.length === 0 && (
-          <Paragraph style={{ marginTop: "10px", color: theme.warningEmphasized, fontSize: "13px" }}>
-            No detected columns yet for the selected CMDB source. Run Load Preview (or select a CSV in Step 1A) to
-            pre-fill Name / Owner / Tier dropdown options. Ignore remains valid for optional enrichment.
+          <Paragraph style={{ marginTop: "10px", color: theme.text, fontSize: "13px", fontWeight: 600 }}>
+            No CMDB columns detected yet — run Load Preview in Step 1/2 to fill Name / Owner / Tier options.
           </Paragraph>
         )}
       </div>

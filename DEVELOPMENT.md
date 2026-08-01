@@ -149,6 +149,29 @@ Always coordinate with `package.json`. Check existing apps for dependency versio
 
 Application Dashboard spacing/fonts live in `ui/app/utils/themeStyles.ts` as the `density` export (Flow Analyst–like compact tables: ~12px body, tighter cell padding). Change tokens there rather than one-off magic numbers in `Overview.tsx` when adjusting visual density. Do not mix density changes with query or tab logic in the same release.
 
-### HubDataTable (v0.1.61+)
+### HubDataTable (v0.1.65+)
 
-`ui/app/components/HubDataTable.tsx` is a small client-side table (sort / filter / column picker / resize) inspired by Netflow Flow Analyst. Migrate **one** Overview table per version. Application Inventory is first (`USE_HUB_DATA_TABLE_INVENTORY` in `Overview.tsx`). Prefer keeping the legacy `<table>` branch until the next table migration proves stable.
+`ui/app/components/HubDataTable.tsx` is the shared dense table for Application Dashboard widgets:
+
+- Cell **⋮** menu: Copy, Filter by `col = value`, Exclude `col ≠ value`, **Open in Dynatrace** when an entity/problem id is resolvable
+- **Visible underlined links** when `getOpenInDynatraceId` resolves (even if the column has a custom `render`)
+- Filter chips + Clear (no per-column header dropdowns)
+- Optional **row selection** (`selectable` / `selectedRowKey` / `onSelectRow`) for Security and RUM master→detail
+- Optional **column `group`** labels render a second header row above consecutive columns
+- Sort, column picker, drag-resize, `localStorage` prefs via `storageKey`
+
+Deep links: [`ui/app/utils/entityLinks.tsx`](ui/app/utils/entityLinks.tsx) — absolute URLs via `getEnvironmentUrl()` + `/ui/nav/{entityId}` (not the app iframe origin); Davis Problems app for problem ids. Supports `FRONTEND-` ids.
+
+Inventory still has `USE_HUB_DATA_TABLE_INVENTORY` for one-line plain-table rollback.
+
+### Application Health queries (v0.1.68+)
+
+`ui/app/queries/applicationHealth.ts` holds Problems / Vulnerabilities / RUM / Health portfolio / services / Gen3 session DQL. CMDB input is only the four Loop B fields; never extend via dynatrace-cmdb-app from this hub workstream.
+
+Join helpers: [`ui/app/utils/joinSources.ts`](ui/app/utils/joinSources.ts) builds classic-tag / grail-field extractors from Setup `entityJoinSources` (no hardcoded keys such as `application_id`).
+
+**IA:** Summary = compact rollup of Signal / Problems / Security / RUM. Detail tabs = deeper evidence. Data Health Status = pack/capability meta.
+
+**RUM join:** Smartscape FRONTEND primary. Join waterfall: Setup join_source → hub map (Document Store `frontendEntityMaps` or optional lookup) → name match. No FRONTEND→host topology in typical tenants — operators must tag frontends with the same Application ID as hosts, or map on the RUM tab.
+
+**Linked Services:** classic `dt.entity.service` via `runs_on[dt.entity.host]` — host eligibility proxy; rolled to Summary **Services**. Evidence by Host includes Linked Services + Spans 24h (separate Services-by-Application widget removed in v0.1.70).

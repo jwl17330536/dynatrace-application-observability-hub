@@ -1,0 +1,10 @@
+app_id,app_name,owner,tier
+automation,Home Automation Core,Platform Engineering,Gold
+dns,Managed DNS Platform,Network Operations,Gold
+dynatrace,Dynatrace Platform Services,Observability Team,Platinum
+mail,Enterprise Messaging Hub,Messaging Team,Silver
+minecraft,Minecraft Community Service,Gaming Services,Bronze
+plex,Media Streaming Platform,Digital Experience,Silver
+proxmox,Proxmox Virtualization Fabric,Infrastructure Team,Platinum
+torrent,Distributed Transfer Service,Edge Services,Bronze
+travel_booking,Travel Booking Engine,Digital Commerce,Gold

@@ -27,6 +27,20 @@ export interface FeaturePacksConfig {
   infrastructureCoverage: FeaturePackConfig;
 }
 
+export type EntityJoinSourceKind = "classic_tag" | "grail_field" | "grail_tag";
+
+export type EntityJoinAppliesTo = "host" | "application" | "synthetic";
+
+/** Extra ways to resolve CMDB application_id from Dynatrace entities (beyond primary host expression). */
+export type EntityJoinSource = {
+  id: string;
+  kind: EntityJoinSourceKind;
+  /** Classic: tag key before colon. Grail field: e.g. dt.cost.product. Grail tag: key after primary_tags. */
+  key: string;
+  appliesTo: EntityJoinAppliesTo[];
+  label?: string;
+};
+
 export interface ApplicationVariableConfig {
   cmdbVariableSourceId: string;
   dynatraceApplicationIdFieldPath: string;
@@ -34,7 +48,21 @@ export interface ApplicationVariableConfig {
   cmdbApplicationNameColumn: string;
   cmdbOwnerColumn: string;
   cmdbTierColumn: string;
+  /** Optional hub-managed lookup name (not cmdb-app). Columns: application_id, frontend_entity_id. */
+  frontendMappingLookupName?: string;
+  /**
+   * In-app RUM maps (Document Store). Prefer over typing a lookup name.
+   * Columns conceptually: frontend_entity_id → application_id.
+   */
+  frontendEntityMaps?: FrontendEntityMap[];
+  /** Additional App ID join sources (classic tags / grail fields / grail tags). */
+  entityJoinSources?: EntityJoinSource[];
 }
+
+export type FrontendEntityMap = {
+  frontend_entity_id: string;
+  application_id: string;
+};
 
 export type FieldDisplayFormat = "text" | "badge" | "pill";
 
@@ -234,7 +262,102 @@ export function getDefaultApplicationVariables(): ApplicationVariableConfig {
     cmdbApplicationNameColumn: IGNORE_COLUMN_VALUE,
     cmdbOwnerColumn: IGNORE_COLUMN_VALUE,
     cmdbTierColumn: IGNORE_COLUMN_VALUE,
+    frontendMappingLookupName: "",
+    frontendEntityMaps: [],
+    entityJoinSources: [],
   };
+}
+
+export function normalizeEntityJoinSources(
+  sources: EntityJoinSource[] | undefined,
+  primaryExpression: string
+): EntityJoinSource[] {
+  const cleaned = (sources || [])
+    .map((source) => ({
+      ...source,
+      id: source.id || `join-${Math.random().toString(36).slice(2, 9)}`,
+      key: (source.key || "").trim(),
+      appliesTo: (source.appliesTo || []).filter(Boolean) as EntityJoinAppliesTo[],
+    }))
+    .filter((source) => source.key && source.appliesTo.length > 0);
+
+  // If nothing configured and primary is a simple identifier, treat as grail_field for hosts.
+  if (!cleaned.length) {
+    const primary = (primaryExpression || "").trim();
+    if (primary && !primary.includes("(") && !primary.includes(" ")) {
+      return [
+        {
+          id: "primary-host-field",
+          kind: "grail_field",
+          key: primary,
+          appliesTo: ["host"],
+          label: "Primary host expression",
+        },
+      ];
+    }
+  }
+  return cleaned;
+}
+
+/** Seed UI list from legacy primary expression when entityJoinSources is empty. */
+export function seedEntityJoinSourcesFromPrimary(
+  sources: EntityJoinSource[] | undefined,
+  primaryExpression: string
+): EntityJoinSource[] {
+  const existing = sources || [];
+  if (existing.length > 0) {
+    return existing;
+  }
+  const primary = (primaryExpression || "").trim();
+  if (!primary) {
+    return [];
+  }
+  return [
+    {
+      id: `join-seed-${Date.now().toString(36)}`,
+      kind: "grail_field",
+      key: primary,
+      appliesTo: ["host"],
+      label: "Primary host expression",
+    },
+  ];
+}
+
+/** Prefer first host grail_field key; else first host mapping key. */
+export function resolvePrimaryFromJoinSources(sources: EntityJoinSource[] | undefined): string {
+  const list = sources || [];
+  const hostGrail = list.find(
+    (source) => source.kind === "grail_field" && source.appliesTo.includes("host") && (source.key || "").trim()
+  );
+  if (hostGrail) {
+    return hostGrail.key.trim();
+  }
+  const hostAny = list.find((source) => source.appliesTo.includes("host") && (source.key || "").trim());
+  return hostAny ? hostAny.key.trim() : "";
+}
+
+export function defaultAppliesToForKind(kind: EntityJoinSourceKind): EntityJoinAppliesTo[] {
+  if (kind === "grail_field") {
+    return ["host"];
+  }
+  return ["application", "synthetic"];
+}
+
+export function placeholderForJoinKind(kind: EntityJoinSourceKind): string {
+  if (kind === "grail_field") {
+    return "e.g. dt.cost.product";
+  }
+  return "e.g. application_id";
+}
+
+export function labelForJoinKind(kind: EntityJoinSourceKind): string {
+  if (kind === "classic_tag") {
+    return "Classic entity tag";
+  }
+  if (kind === "grail_field") {
+    return "Primary Grail field";
+  }
+  return "Primary Grail tag";
 }
 
 export function getDefaultFeaturePacks(): FeaturePacksConfig {
