@@ -111,7 +111,6 @@ interface ObservabilitySummaryRow {
   app_id?: string;
   app_name?: string;
   host_count?: number;
-  trace_eligible_hosts?: number;
   traces_pct?: number;
   metrics_pct?: number;
   logs_pct?: number;
@@ -120,6 +119,9 @@ interface ObservabilitySummaryRow {
   logs_hosts?: number;
   trace_event_count?: number;
   log_event_count?: number;
+  over_monitored_hosts?: number;
+  under_monitored_hosts?: number;
+  app_mode_fit?: string;
 }
 
 interface ObservabilityHostRow {
@@ -129,12 +131,13 @@ interface ObservabilityHostRow {
   host_name?: string;
   monitoring_mode?: string;
   service_count?: number | string;
-  trace_eligible?: number | string;
   traces_status?: string;
   metrics_status?: string;
   logs_status?: string;
   spans_count_num?: number;
   logs_count_num?: number;
+  monitoring_verdict?: string;
+  signals_aligned?: string;
 }
 
 interface ObservabilityDiagnosticsRow {
@@ -407,22 +410,41 @@ function formatSignalPercent(value: unknown, telemetryBlocked: boolean): string 
   return formatPercent(value, "-");
 }
 
-function formatEligibleTraceCount(value: unknown, eligibleValue: unknown, telemetryBlocked: boolean): string {
-  if (telemetryBlocked) {
-    return "-";
-  }
-  const eligible = toNumber(eligibleValue);
-  if (eligible === 0) {
-    return "-";
-  }
-  return formatCount(value);
-}
-
 function resolveSignalStatus(value: string | undefined, telemetryBlocked: boolean): string {
   if (telemetryBlocked) {
     return "BLOCKED";
   }
   return value || "NO";
+}
+
+function verdictBadge(value: string, tooltipText?: string): React.ReactNode {
+  let bg: string;
+  let fg: string;
+  // advisory/cost-saving states use blue (informational, not alarming)
+  if (value === "REVIEW" || value === "ALL_REVIEW" || value === "MIXED") {
+    bg = theme.primarySubtle; fg = theme.primaryText;
+  } else if (value === "CORRECT" || value === "ALIGNED") {
+    bg = theme.successBg; fg = theme.successText;
+  } else if (value === "UNDER_MONITORED" || value === "GAP") {
+    bg = theme.criticalBg; fg = theme.criticalText;
+  } else if (value === "PARTIAL") {
+    bg = theme.surfaceSubtle; fg = theme.warningText;
+  } else {
+    bg = theme.surfaceSubtle; fg = theme.textSecondary;
+  }
+  return (
+    <span
+      title={tooltipText}
+      style={{
+        display: "inline-block", padding: "2px 8px", borderRadius: "4px",
+        fontWeight: 700, fontSize: "11px", letterSpacing: "0.04em",
+        background: bg, color: fg,
+        cursor: tooltipText ? "help" : undefined, whiteSpace: "nowrap",
+      }}
+    >
+      {value}
+    </span>
+  );
 }
 
 function sanitizeColumnName(value: string): string {
@@ -696,16 +718,19 @@ timeseries logs_status = sum(dt.log.status_per_entity_count), by:{dt.entity.host
 | fields host_id, logs_count_by_metric
 ], sourceField:host_id, lookupField:host_id, fields:{logs_count_by_metric}
 | fieldsAdd spans_count_num = coalesce(toLong(spans_count_by_id), toLong(spans_count_by_name), toLong(spans_count_by_service_host), 0), logs_count_num = coalesce(toLong(logs_count_by_id), toLong(logs_count_by_name), toLong(logs_count_by_metric), 0)
-| fieldsAdd trace_eligible = if(coalesce(toLong(service_count), 0) > 0, then:1, else:0)
-| fieldsAdd has_traces = if(trace_eligible == 1 AND isNotNull(spans_count_num) AND spans_count_num > 0, then:1, else:0), has_logs = if(isNotNull(logs_count_num) AND logs_count_num > 0, then:1, else:0), has_metrics = if(isNotNull(monitoring_mode) AND monitoring_mode != "" AND monitoring_mode != "OFF", then:1, else:0)
-| summarize host_count = countDistinct(host_id), trace_eligible_hosts = sum(trace_eligible), traces_hosts = sum(has_traces), metrics_hosts = sum(has_metrics), logs_hosts = sum(has_logs), trace_event_count = sum(spans_count_num), log_event_count = sum(logs_count_num), by:{app_id}
-| fieldsAdd traces_pct = if(trace_eligible_hosts == 0, then:null, else:round(100.0 * traces_hosts / trace_eligible_hosts)), metrics_pct = if(host_count == 0, then:0, else:round(100.0 * metrics_hosts / host_count)), logs_pct = if(host_count == 0, then:0, else:round(100.0 * logs_hosts / host_count))
+| fieldsAdd has_traces = if(isNotNull(spans_count_num) AND spans_count_num > 0, then:1, else:0), has_logs = if(isNotNull(logs_count_num) AND logs_count_num > 0, then:1, else:0), has_metrics = if(isNotNull(monitoring_mode) AND monitoring_mode != "" AND monitoring_mode != "OFF", then:1, else:0)
+| fieldsAdd is_fullstack = if(monitoring_mode == "FULL_STACK", then:1, else:0)
+| fieldsAdd over_monitored = if(is_fullstack == 1 AND coalesce(toLong(service_count), 0) == 0 AND spans_count_num == 0, then:1, else:0)
+| fieldsAdd under_monitored = if(is_fullstack == 0 AND coalesce(toLong(service_count), 0) > 0, then:1, else:0)
+| summarize host_count = countDistinct(host_id), traces_hosts = sum(has_traces), metrics_hosts = sum(has_metrics), logs_hosts = sum(has_logs), trace_event_count = sum(spans_count_num), log_event_count = sum(logs_count_num), over_monitored_hosts = sum(over_monitored), under_monitored_hosts = sum(under_monitored), by:{app_id}
+| fieldsAdd traces_pct = if(host_count == 0, then:0, else:round(100.0 * traces_hosts / host_count)), metrics_pct = if(host_count == 0, then:0, else:round(100.0 * metrics_hosts / host_count)), logs_pct = if(host_count == 0, then:0, else:round(100.0 * logs_hosts / host_count))
+| fieldsAdd app_mode_fit = if(under_monitored_hosts > 0, then:"UNDER_MONITORED", else:if(over_monitored_hosts == host_count, then:"ALL_REVIEW", else:if(over_monitored_hosts > 0, then:"MIXED", else:"CORRECT")))
 | lookup [
 ${cmdbDataset}
 | fields cmdb_app_id, cmdb_app_name
 ], sourceField:app_id, lookupField:cmdb_app_id, fields:{cmdb_app_name}
 | fieldsAdd app_name = if(isNotNull(cmdb_app_name) AND cmdb_app_name != "", then:cmdb_app_name, else:app_id)
-| fields app_id, app_name, host_count, trace_eligible_hosts, traces_hosts, metrics_hosts, logs_hosts, trace_event_count, log_event_count, traces_pct, metrics_pct, logs_pct
+| fields app_id, app_name, host_count, traces_hosts, metrics_hosts, logs_hosts, trace_event_count, log_event_count, traces_pct, metrics_pct, logs_pct, over_monitored_hosts, under_monitored_hosts, app_mode_fit
 | sort app_name asc
 | limit 500`;
 }
@@ -772,14 +797,30 @@ timeseries logs_status = sum(dt.log.status_per_entity_count), by:{dt.entity.host
 | fields host_id, logs_count_by_metric
 ], sourceField:host_id, lookupField:host_id, fields:{logs_count_by_metric}
 | fieldsAdd spans_count_num = coalesce(toLong(spans_count_by_id), toLong(spans_count_by_name), toLong(spans_count_by_service_host), 0), logs_count_num = coalesce(toLong(logs_count_by_id), toLong(logs_count_by_name), toLong(logs_count_by_metric), 0)
-| fieldsAdd trace_eligible = if(coalesce(toLong(service_count), 0) > 0, then:1, else:0)
-| fieldsAdd traces_status = if(trace_eligible == 0, then:"N/A", else:if(isNotNull(spans_count_num) AND spans_count_num > 0, then:"YES", else:"NO")), logs_status = if(isNotNull(logs_count_num) AND logs_count_num > 0, then:"YES", else:"NO"), metrics_status = if(isNotNull(monitoring_mode) AND monitoring_mode != "" AND monitoring_mode != "OFF", then:"YES", else:"NO")
+| fieldsAdd traces_status = if(isNotNull(spans_count_num) AND spans_count_num > 0, then:"YES", else:"NO"), logs_status = if(isNotNull(logs_count_num) AND logs_count_num > 0, then:"YES", else:"NO"), metrics_status = if(isNotNull(monitoring_mode) AND monitoring_mode != "" AND monitoring_mode != "OFF", then:"YES", else:"NO")
+| fieldsAdd monitoring_verdict = if(
+  monitoring_mode == "FULL_STACK",
+  then: if(coalesce(toLong(service_count), 0) > 0 OR spans_count_num > 0, then:"CORRECT", else:"REVIEW"),
+  else: if(
+    monitoring_mode == "INFRASTRUCTURE" OR monitoring_mode == "INFRA",
+    then: if(coalesce(toLong(service_count), 0) > 0, then:"UNDER_MONITORED", else:"CORRECT"),
+    else: if(coalesce(toLong(service_count), 0) > 0, then:"UNDER_MONITORED", else:"CORRECT")))
+| fieldsAdd signals_aligned = if(
+  monitoring_mode == "FULL_STACK",
+  then: if(
+    metrics_status == "YES" AND logs_status == "YES" AND (coalesce(toLong(service_count), 0) == 0 OR traces_status == "YES"),
+    then:"ALIGNED",
+    else: if(metrics_status == "YES", then:"PARTIAL", else:"GAP")),
+  else: if(
+    monitoring_mode == "INFRASTRUCTURE" OR monitoring_mode == "INFRA",
+    then: if(metrics_status == "YES" AND logs_status == "YES", then:"ALIGNED", else: if(metrics_status == "YES", then:"PARTIAL", else:"GAP")),
+    else: if(metrics_status == "YES", then:"ALIGNED", else:"GAP")))
 | lookup [
 ${cmdbDataset}
 | fields cmdb_app_id, cmdb_app_name
 ], sourceField:app_id, lookupField:cmdb_app_id, fields:{cmdb_app_name}
 | fieldsAdd app_name = if(isNotNull(cmdb_app_name) AND cmdb_app_name != "", then:cmdb_app_name, else:app_id)
-| fields app_id, app_name, host_id, host_name, monitoring_mode, service_count, trace_eligible, spans_count_num, logs_count_num, traces_status, metrics_status, logs_status
+| fields app_id, app_name, host_id, host_name, monitoring_mode, service_count, spans_count_num, logs_count_num, traces_status, metrics_status, logs_status, monitoring_verdict, signals_aligned
 | sort app_name asc, host_name asc
 | limit 1000`;
 }
@@ -2399,25 +2440,24 @@ function DashboardView({ config }: { config: MappingConfig }) {
 
   const hostCoverageTotals = React.useMemo(() => {
     let hostCount = 0;
-    let traceEligible = 0;
     let tracesHosts = 0;
     let metricsHosts = 0;
     let logsHosts = 0;
     for (const row of observabilitySummaryRows) {
       hostCount += toNumber(row.host_count) ?? 0;
-      traceEligible += toNumber(row.trace_eligible_hosts) ?? 0;
       tracesHosts += toNumber(row.traces_hosts) ?? 0;
       metricsHosts += toNumber(row.metrics_hosts) ?? 0;
       logsHosts += toNumber(row.logs_hosts) ?? 0;
     }
     let fullStack = 0;
+    // eligible = hosts with at least one linked service (trace-capable)
+    let traceEligible = 0;
     const modeCounts = new Map<string, number>();
     for (const row of observabilityHostRows) {
       const mode = String(row.monitoring_mode || "UNKNOWN").trim() || "UNKNOWN";
       modeCounts.set(mode, (modeCounts.get(mode) || 0) + 1);
-      if (mode === "FULL_STACK") {
-        fullStack += 1;
-      }
+      if (mode === "FULL_STACK") fullStack += 1;
+      if ((toNumber(row.service_count) ?? 0) > 0) traceEligible += 1;
     }
     const hostRowCount = observabilityHostRows.length;
     return {
@@ -2575,28 +2615,16 @@ function DashboardView({ config }: { config: MappingConfig }) {
   const signalAttentionCounts = React.useMemo(() => {
     let logsNo = 0;
     let tracesNo = 0;
+    let overMonitored = 0;
+    let underMonitored = 0;
     for (const row of observabilityHostRows) {
-      if (row.logs_status === "NO") {
-        logsNo += 1;
-      }
-      const traceEligible =
-        (toNumber(row.trace_eligible) ?? 0) > 0 ||
-        (String(row.monitoring_mode || "").trim() === "FULL_STACK" && (toNumber(row.service_count) ?? 0) > 0);
-      if (traceEligible && row.traces_status === "NO") {
-        tracesNo += 1;
-      }
+      if (row.logs_status === "NO") logsNo += 1;
+      if (row.traces_status === "NO") tracesNo += 1;
+      if (row.monitoring_verdict === "REVIEW") overMonitored += 1;
+      if (row.monitoring_verdict === "UNDER_MONITORED") underMonitored += 1;
     }
-    return { logsNo, tracesNo };
+    return { logsNo, tracesNo, overMonitored, underMonitored };
   }, [observabilityHostRows]);
-
-  const fullStackNotTraceEligibleCount = React.useMemo(
-    () =>
-      observabilityHostRows.filter(
-        (row) =>
-          String(row.monitoring_mode || "").trim() === "FULL_STACK" && (toNumber(row.service_count) ?? 0) === 0
-      ).length,
-    [observabilityHostRows]
-  );
 
   const toggleSecuritySeverity = React.useCallback((risk: string) => {
     setSecuritySeverityFilter((prev) => {
@@ -2821,7 +2849,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
               title="Hosts with trace evidence"
               numerator={hostCoverageTotals.tracesHosts}
               denominator={hostCoverageTotals.traceEligible || hostCoverageTotals.hostCount}
-              subtitle="Eligible hosts with spans in 24h"
+              subtitle={hostCoverageTotals.traceEligible > 0 ? `of ${hostCoverageTotals.traceEligible} with linked services` : "Hosts with spans in 24h"}
             />
             <ComparisonKpi
               title="Hosts monitored"
@@ -2830,6 +2858,36 @@ function DashboardView({ config }: { config: MappingConfig }) {
               subtitle="Agent mode not OFF"
             />
           </div>
+          {(signalAttentionCounts.overMonitored > 0 || signalAttentionCounts.underMonitored > 0 || signalAttentionCounts.logsNo > 0) && (
+            <div
+              style={{
+                marginTop: "10px",
+                borderLeft: `3px solid ${theme.primary}`,
+                borderRadius: "4px",
+                padding: "10px 14px",
+                backgroundColor: theme.surface,
+                display: "grid",
+                gap: "4px",
+              }}
+            >
+              <span style={{ fontWeight: 700, fontSize: "13px", color: theme.text }}>Monitoring right-sizing</span>
+              {signalAttentionCounts.overMonitored > 0 && (
+                <span style={{ fontSize: "12px", color: theme.text }}>
+                  <strong style={{ color: theme.primaryText }}>{signalAttentionCounts.overMonitored} FULL_STACK host{signalAttentionCounts.overMonitored > 1 ? "s" : ""} with no APM signal</strong> — potential cost saving via mode downgrade. Open Signal → Evidence by Host.
+                </span>
+              )}
+              {signalAttentionCounts.underMonitored > 0 && (
+                <span style={{ fontSize: "12px", color: theme.text }}>
+                  <strong style={{ color: theme.criticalText }}>{signalAttentionCounts.underMonitored} host{signalAttentionCounts.underMonitored > 1 ? "s" : ""} UNDER_MONITORED</strong> — services detected but mode below FULL_STACK. Upgrade to capture traces and reduce risk.
+                </span>
+              )}
+              {signalAttentionCounts.logsNo > 0 && (
+                <span style={{ fontSize: "12px", color: theme.text }}>
+                  <strong style={{ color: theme.criticalText }}>{signalAttentionCounts.logsNo} host{signalAttentionCounts.logsNo > 1 ? "s" : ""} missing log evidence</strong> — check log ingest configuration.
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -3422,6 +3480,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
                     title="Hosts with traces"
                     numerator={hostCoverageTotals.tracesHosts}
                     denominator={hostCoverageTotals.traceEligible || hostCoverageTotals.hostCount}
+                    subtitle={hostCoverageTotals.traceEligible > 0 ? `of ${hostCoverageTotals.traceEligible} with linked services` : undefined}
                   />
                   <ComparisonKpi
                     title="Hosts monitored"
@@ -3483,8 +3542,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
                         render: (row) => row.app_name || row.app_id || "-",
                       },
                       { id: "host_count", label: "Hosts", width: 80, align: "right", getValue: (row) => toNumber(row.host_count) ?? 0, render: (row) => formatCount(row.host_count) },
-                      { id: "trace_eligible_hosts", label: "Trace Eligible Hosts", width: 130, align: "right", render: (row) => formatSignalCount(row.trace_eligible_hosts, telemetryRuntimeBlocked) },
-                      { id: "traces_hosts", label: "Trace Hosts", width: 100, align: "right", render: (row) => formatEligibleTraceCount(row.traces_hosts, row.trace_eligible_hosts, telemetryRuntimeBlocked) },
+                      { id: "traces_hosts", label: "Trace Hosts", width: 100, align: "right", render: (row) => formatSignalCount(row.traces_hosts, telemetryRuntimeBlocked) },
                       {
                         id: "traces_pct",
                         label: "Traces %",
@@ -3497,11 +3555,29 @@ function DashboardView({ config }: { config: MappingConfig }) {
                         ),
                       },
                       {
+                        id: "app_mode_fit",
+                        label: "Mode Fit",
+                        width: 120,
+                        align: "center",
+                        getValue: (row) => row.app_mode_fit || "-",
+                        render: (row) => {
+                          const v = row.app_mode_fit || "-";
+                          const tooltip = v === "ALL_REVIEW"
+                            ? "All hosts FULL_STACK with no APM signal — review for mode downgrade (cost saving)"
+                            : v === "MIXED"
+                            ? "Mix of CORRECT and REVIEW hosts — see Evidence by Host"
+                            : v === "UNDER_MONITORED"
+                            ? "Services detected on hosts below FULL_STACK — traces unavailable (risk)"
+                            : undefined;
+                          return verdictBadge(v, tooltip);
+                        },
+                      },
+                      {
                         id: "trace_event_count",
                         label: "Trace events 24h",
                         width: 120,
                         align: "right",
-                        render: (row) => formatEligibleTraceCount(row.trace_event_count, row.trace_eligible_hosts, telemetryRuntimeBlocked),
+                        render: (row) => formatSignalCount(row.trace_event_count, telemetryRuntimeBlocked),
                       },
                       {
                         id: "metrics_pct",
@@ -3533,14 +3609,14 @@ function DashboardView({ config }: { config: MappingConfig }) {
                 )}
               </WidgetCard>
 
-              {(signalAttentionCounts.logsNo > 0 || signalAttentionCounts.tracesNo > 0) && (
+                  {signalAttentionCounts.logsNo > 0 || signalAttentionCounts.tracesNo > 0 || signalAttentionCounts.overMonitored > 0 || signalAttentionCounts.underMonitored > 0 ? (
                 <div
                   style={{
                     marginTop: "12px",
                     padding: "10px 12px",
-                    borderRadius: "6px",
-                    border: `1px solid ${theme.warningBorder}`,
-                    backgroundColor: theme.warningBg,
+                    borderRadius: "4px",
+                    borderLeft: `3px solid ${theme.borderStrong}`,
+                    backgroundColor: theme.surface,
                     display: "flex",
                     gap: "16px",
                     flexWrap: "wrap",
@@ -3549,17 +3625,27 @@ function DashboardView({ config }: { config: MappingConfig }) {
                 >
                   <span style={{ fontSize: "13px", fontWeight: 700, color: theme.text }}>Signal attention</span>
                   {signalAttentionCounts.logsNo > 0 ? (
-                    <span style={{ fontSize: "13px", fontWeight: 600, color: theme.warningEmphasized }}>
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: theme.criticalText }}>
                       {signalAttentionCounts.logsNo} host{signalAttentionCounts.logsNo === 1 ? "" : "s"} with Logs=NO
                     </span>
                   ) : null}
                   {signalAttentionCounts.tracesNo > 0 ? (
-                    <span style={{ fontSize: "13px", fontWeight: 600, color: theme.warningEmphasized }}>
-                      {signalAttentionCounts.tracesNo} trace-eligible host{signalAttentionCounts.tracesNo === 1 ? "" : "s"} with Traces=NO
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: theme.text }}>
+                      {signalAttentionCounts.tracesNo} host{signalAttentionCounts.tracesNo === 1 ? "" : "s"} with Traces=NO
+                    </span>
+                  ) : null}
+                  {signalAttentionCounts.overMonitored > 0 ? (
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: theme.primaryText }}>
+                      {signalAttentionCounts.overMonitored} FULL_STACK host{signalAttentionCounts.overMonitored === 1 ? "" : "s"} with no APM signal — review mode
+                    </span>
+                  ) : null}
+                  {signalAttentionCounts.underMonitored > 0 ? (
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: theme.criticalText }}>
+                      {signalAttentionCounts.underMonitored} host{signalAttentionCounts.underMonitored === 1 ? "" : "s"} with services but below FULL_STACK — upgrade mode
                     </span>
                   ) : null}
                 </div>
-              )}
+                ) : null}
 
               <div style={{ marginTop: "12px" }}>
                 <WidgetCard
@@ -3599,7 +3685,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
                           label: "Spans 24h",
                           width: 100,
                           align: "right",
-                          render: (row) => (row.traces_status === "N/A" ? "-" : formatSignalCount(row.spans_count_num, telemetryRuntimeBlocked)),
+                          render: (row) => formatSignalCount(row.spans_count_num, telemetryRuntimeBlocked),
                         },
                         {
                           id: "traces_status",
@@ -3632,88 +3718,93 @@ function DashboardView({ config }: { config: MappingConfig }) {
                             return <span style={{ color: statusTone(status), fontWeight: 700 }}>{status}</span>;
                           },
                         },
+                        {
+                          id: "monitoring_verdict",
+                          label: "Mode Fit",
+                          width: 120,
+                          align: "center",
+                          getValue: (row) => row.monitoring_verdict || "-",
+                          render: (row) => {
+                            const v = row.monitoring_verdict || "-";
+                            const tooltip = v === "REVIEW"
+                              ? "FULL_STACK with no APM signal — Infrastructure mode may suffice (cost saving)"
+                              : v === "UNDER_MONITORED"
+                              ? "Services detected but mode is below FULL_STACK — traces unavailable (risk)"
+                              : v === "CORRECT"
+                              ? "Mode is appropriate for the detected signal profile"
+                              : undefined;
+                            return verdictBadge(v, tooltip);
+                          },
+                        },
+                        {
+                          id: "signals_aligned",
+                          label: "Signals Aligned",
+                          width: 120,
+                          align: "center",
+                          getValue: (row) => row.signals_aligned || "-",
+                          render: (row) => {
+                            const v = row.signals_aligned || "-";
+                            const tooltip = v === "PARTIAL"
+                              ? "Some expected signals for this monitoring mode are absent"
+                              : v === "GAP"
+                              ? "Critical expected signals for this monitoring mode are missing"
+                              : v === "ALIGNED"
+                              ? "All expected signals for this monitoring mode are present"
+                              : undefined;
+                            return verdictBadge(v, tooltip);
+                          },
+                        },
                       ]}
                     />
                   )}
                 </WidgetCard>
               </div>
 
-              <div style={{ marginTop: "12px" }}>
-                <WidgetCard
-                  title="Trace Coverage Gaps"
-                  provenance="Standard Pack 1"
-                  subtitle="Eligible trace gaps only — FULL_STACK hosts with classic services and zero host-attributed spans. N/A in Evidence = not trace-eligible (no linked services)."
-                  isLoading={traceCoverageGapsResult.isLoading}
-                  error={traceCoverageGapsResult.error}
-                >
-                  {traceCoverageGapRows.length === 0 ? (
-                    <>
-                      <Paragraph style={{ color: theme.successText }}>
-                        No eligible trace gaps (FULL_STACK hosts with classic services and zero host-attributed spans).
-                      </Paragraph>
-                      {fullStackNotTraceEligibleCount > 0 ? (
-                        <Paragraph style={{ color: theme.textMuted, fontSize: "12px", marginTop: "8px" }}>
-                          {fullStackNotTraceEligibleCount} host{fullStackNotTraceEligibleCount === 1 ? "" : "s"} not trace-eligible (no classic services)
-                        </Paragraph>
-                      ) : null}
-                    </>
-                  ) : (
-                    <HubDataTable<TraceCoverageGapRow>
-                      storageKey="aoh.hubDataTable.traceGaps.v1"
-                      rows={traceCoverageGapRows}
-                      rowKey={(row, index) => `${row.host_name || "host"}-${index}`}
-                      columns={[
-                        { id: "app_name", label: "Application", width: 140, getValue: (row) => row.app_name || row.app_id || "-", render: (row) => row.app_name || row.app_id || "-" },
-                        {
-                          id: "host_name",
-                          label: "Host",
-                          width: 160,
-                          getOpenInDynatraceId: (row) => row.host_id || null,
-                        },
-                        { id: "monitoring_mode", label: "Monitoring Mode", width: 120 },
-                        {
-                          id: "service_count",
-                          label: "Linked Services",
-                          width: 120,
-                          align: "right",
-                          getValue: (row) => toNumber(row.service_count) ?? 0,
-                          render: (row) => String(toNumber(row.service_count) ?? 0),
-                        },
-                        {
-                          id: "spans_by_service_host",
-                          label: "Service-Path Spans",
-                          width: 130,
-                          align: "right",
-                          getValue: (row) => toNumber(row.spans_by_service_host) ?? 0,
-                          render: (row) => String(toNumber(row.spans_by_service_host) ?? 0),
-                        },
-                        {
-                          id: "gap_reason",
-                          label: "Reason",
-                          width: 420,
-                          minWidth: 280,
-                          getValue: (row) => row.gap_reason || "-",
-                          render: (row) => (
-                            <span
-                              title={row.gap_reason || undefined}
-                              style={{
-                                color: theme.warningEmphasized,
-                                fontWeight: 600,
-                                whiteSpace: "normal",
-                                wordBreak: "break-word",
-                                display: "block",
-                                lineHeight: 1.35,
-                              }}
-                            >
-                              {row.gap_reason || "-"}
-                            </span>
-                          ),
-                        },
-                      ]}
-                    />
-                  )}
-                </WidgetCard>
-              </div>
+              {(() => {
+                const reviewHosts = observabilityHostRows.filter((r) => r.monitoring_verdict === "REVIEW");
+                const underHosts = observabilityHostRows.filter((r) => r.monitoring_verdict === "UNDER_MONITORED");
+                const partialHosts = observabilityHostRows.filter((r) => r.signals_aligned === "PARTIAL" || r.signals_aligned === "GAP");
+                if (reviewHosts.length === 0 && underHosts.length === 0 && partialHosts.length === 0) return null;
+                // group REVIEW hosts by application for the callout
+                const reviewByApp = new Map<string, number>();
+                for (const r of reviewHosts) {
+                  const app = r.app_name || r.app_id || "Unknown";
+                  reviewByApp.set(app, (reviewByApp.get(app) || 0) + 1);
+                }
+                return (
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      border: `1px solid ${theme.border}`,
+                      borderLeft: `3px solid ${theme.primary}`,
+                      borderRadius: "4px",
+                      padding: "14px 16px",
+                      backgroundColor: theme.surface,
+                      display: "grid",
+                      gap: "6px",
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, fontSize: "14px", color: theme.text }}>Right-sizing opportunities</span>
+                    {reviewHosts.length > 0 && (
+                      <span style={{ fontSize: "13px", color: theme.text }}>
+                        <strong style={{ color: theme.primaryText }}>{reviewHosts.length} FULL_STACK host{reviewHosts.length > 1 ? "s" : ""} with no APM signal</strong> — potential mode downgrade (cost saving):
+                        {" "}{Array.from(reviewByApp.entries()).map(([app, count]) => `${app} (${count})`).join(", ")}
+                      </span>
+                    )}
+                    {underHosts.length > 0 && (
+                      <span style={{ fontSize: "13px", color: theme.text }}>
+                        <strong style={{ color: theme.criticalText }}>{underHosts.length} host{underHosts.length > 1 ? "s" : ""} UNDER_MONITORED</strong> — services detected but mode below FULL_STACK; traces unavailable (risk)
+                      </span>
+                    )}
+                    {partialHosts.length > 0 && (
+                      <span style={{ fontSize: "13px", color: theme.text }}>
+                        <strong style={{ color: theme.criticalText }}>{partialHosts.length} host{partialHosts.length > 1 ? "s" : ""} with signal gaps</strong> — expected signals for monitoring mode are missing:
+                        {" "}{partialHosts.map((r) => r.host_name || "-").join(", ")}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
         </div>
       )}
       </>
