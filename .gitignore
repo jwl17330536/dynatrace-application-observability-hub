@@ -38,6 +38,14 @@ CLAUDE.md
 .instructions.md
 .claude/
 
+# Dynatrace App Toolkit — auth tokens and local dev config with real tenant URL
+.dt-app/
+app.config.json
+
+# Compiled artifacts
+*.zip
+app-bundle.zip
+
 # Customer-specific data (do not commit)
 /customer-configs/
 /customer-data/
