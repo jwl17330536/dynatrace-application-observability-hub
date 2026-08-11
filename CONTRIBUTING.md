@@ -63,6 +63,22 @@ This ensures visualizations remain data-source-agnostic.
 - Check handling of invalid field mappings
 - Validate multi-tenant isolation
 
+## Local Scaffolding Workflow
+
+Use local-only scaffolding for personal and machine-specific iteration state:
+
+1. `.env.local` or `.env.*.local` for local environment values.
+2. `local-only/` and `docs/local-only/` for private notes and runbooks.
+3. `*.local.md` for local documentation drafts.
+
+Do not commit local-only scaffolding. See `.gitignore` for enforced patterns.
+
+If a currently tracked file must become local-only, untrack it first, then rely on `.gitignore`.
+
+## Repository Boundary Rule
+
+This repository must remain standalone for public reuse and must not require runtime dependency on private/internal sibling repos (including `dynatrace-infrastructure-observability-framework`).
+
 ## Submission
 
 Before submitting a PR:
