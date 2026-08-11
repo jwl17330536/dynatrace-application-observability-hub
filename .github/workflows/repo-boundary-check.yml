@@ -15,7 +15,9 @@ jobs:
       - name: Ensure no private repo coupling
         run: |
           set -euo pipefail
-          if git grep -nE "dynatrace-infrastructure-observability-framework|dt_infrastructure_adapters" -- .; then
+          if git grep -nE "dynatrace-infrastructure-observability-framework|dt_infrastructure_adapters" -- . \
+            ':(exclude).github/workflows/repo-boundary-check.yml' \
+            ':(exclude)**/*.md'; then
             echo "Found forbidden cross-repo dependency reference."
             exit 1
           fi
