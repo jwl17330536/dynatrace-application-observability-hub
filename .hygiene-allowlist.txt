@@ -1,0 +1,10 @@
+# Optional regex allowlist for scripts/repo-hygiene-check.sh
+# One regex per line. Matches are excluded from failures.
+# Example:
+# ^docs/legacy/.*
+
+# Legacy historical docs with machine-local path transcripts
+^DEPLOYMENT_READY\.md:
+^IMPLEMENTATION_SUMMARY\.md:
+^PHASE_1\.5_TESTING_GUIDE\.md:
+^PHASE_1_COMPLETION_SUMMARY\.md:

@@ -237,6 +237,7 @@ interface DigitalHostRow {
 
 interface DigitalHostSignalRow extends DigitalHostRow {
   monitoring_mode?: string;
+  service_count?: number | string;
   traces_status?: string;
   metrics_status?: string;
   logs_status?: string;
@@ -319,29 +320,6 @@ function statusTone(value: string | undefined): string {
   return theme.warningEmphasized;
 }
 
-function readinessTone(value: string | undefined): string {
-  if (value === "READY") {
-    return theme.successText;
-  }
-  if (value === "PARTIAL") {
-    return theme.warningEmphasized;
-  }
-  return theme.criticalText;
-}
-
-function riskTone(value: string | undefined): string {
-  if (value === "CRITICAL") {
-    return theme.criticalText;
-  }
-  if (value === "HIGH") {
-    return theme.warningEmphasized;
-  }
-  if (value === "ELEVATED") {
-    return theme.warningEmphasized;
-  }
-  return theme.primaryText;
-}
-
 function attentionCountColor(value: unknown): string {
   const n = toNumber(value);
   if (n !== null && n > 0) {
@@ -373,6 +351,78 @@ function toNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function isInfrastructureMode(value: string | undefined): boolean {
+  const mode = String(value || "").trim().toUpperCase();
+  return mode === "INFRASTRUCTURE" || mode === "INFRA";
+}
+
+function resolveTraceStatus(
+  traceStatus: string | undefined,
+  monitoringMode: string | undefined,
+  telemetryBlocked: boolean,
+  serviceCount?: number | string
+): string {
+  if (telemetryBlocked) {
+    return "BLOCKED";
+  }
+
+  const normalized = String(traceStatus || "NO").trim().toUpperCase() || "NO";
+  if (normalized === "YES" || normalized === "N/A") {
+    return normalized;
+  }
+
+  if (normalized === "NO" && isInfrastructureMode(monitoringMode)) {
+    const linkedServices = toNumber(serviceCount);
+    if (linkedServices !== null && linkedServices <= 0) {
+      return "N/A";
+    }
+  }
+
+  return normalized;
+}
+
+function traceStatusTone(value: string): string {
+  if (value === "N/A") {
+    return theme.successText;
+  }
+  return statusTone(value);
+}
+
+function traceCoverageExpected(row: ObservabilitySummaryRow): boolean {
+  const modeFit = String(row.app_mode_fit || "").toUpperCase();
+  if (modeFit === "UNDER_MONITORED" || modeFit === "ALL_REVIEW" || modeFit === "MIXED") {
+    return true;
+  }
+
+  const traceHosts = toNumber(row.traces_hosts) ?? 0;
+  const traceEvents = toNumber(row.trace_event_count) ?? 0;
+  if (traceHosts > 0 || traceEvents > 0) {
+    return true;
+  }
+
+  return false;
+}
+
+function renderTracePercentValue(row: ObservabilitySummaryRow, telemetryBlocked: boolean): React.ReactNode {
+  if (telemetryBlocked) {
+    return <span style={{ color: theme.textMuted, fontWeight: 600 }}>-</span>;
+  }
+
+  if (!traceCoverageExpected(row)) {
+    return (
+      <span style={{ color: theme.successText, fontWeight: 600 }} title="Trace capture is not expected for this app mode mix.">
+        N/A
+      </span>
+    );
+  }
+
+  return (
+    <span style={{ color: signalPctColor(row.traces_pct), fontWeight: 600 }}>
+      {formatPercent(row.traces_pct, "-")}
+    </span>
+  );
 }
 
 function formatCount(value: unknown): string {
@@ -1905,6 +1955,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
       return {
         ...row,
         monitoring_mode: signal.monitoring_mode,
+        service_count: signal.service_count,
         traces_status: signal.traces_status,
         metrics_status: signal.metrics_status,
         logs_status: signal.logs_status,
@@ -2619,12 +2670,13 @@ function DashboardView({ config }: { config: MappingConfig }) {
     let underMonitored = 0;
     for (const row of observabilityHostRows) {
       if (row.logs_status === "NO") logsNo += 1;
-      if (row.traces_status === "NO") tracesNo += 1;
+      const traceStatus = resolveTraceStatus(row.traces_status, row.monitoring_mode, telemetryRuntimeBlocked, row.service_count);
+      if (traceStatus === "NO") tracesNo += 1;
       if (row.monitoring_verdict === "REVIEW") overMonitored += 1;
       if (row.monitoring_verdict === "UNDER_MONITORED") underMonitored += 1;
     }
     return { logsNo, tracesNo, overMonitored, underMonitored };
-  }, [observabilityHostRows]);
+  }, [observabilityHostRows, telemetryRuntimeBlocked]);
 
   const toggleSecuritySeverity = React.useCallback((risk: string) => {
     setSecuritySeverityFilter((prev) => {
@@ -3465,7 +3517,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
         <div style={{ marginBottom: "12px", display: "grid", gap: "12px" }}>
               <div>
                 <SectionIntro title="Host coverage">Same X/Y ratios as Summary — Signal evidence over 24h.</SectionIntro>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: "12px", marginBottom: "12px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: "12px", marginBottom: "12px" }}>
                   <ComparisonKpi
                     title="Hosts full stack"
                     numerator={hostCoverageTotals.fullStack}
@@ -3488,34 +3540,39 @@ function DashboardView({ config }: { config: MappingConfig }) {
                     denominator={hostCoverageTotals.hostCount}
                   />
                 </div>
-                <div
-                  style={{
-                    border: `1px solid ${theme.border}`,
-                    borderRadius: density.cardRadius,
-                    padding: density.cardPadding,
-                    backgroundColor: theme.surface,
-                    marginBottom: "12px",
-                  }}
-                >
-                  <SectionIntro title="Monitoring mode mix">Distribution of agent monitoring modes across hosts.</SectionIntro>
-                  {monitoringModeCompact ? (
-                    <span
-                      style={{
-                        display: "inline-block",
-                        fontSize: "13px",
-                        fontWeight: 700,
-                        color: theme.primaryText,
-                        backgroundColor: theme.surfaceSubtle,
-                        border: `1px solid ${theme.border}`,
-                        borderRadius: "999px",
-                        padding: "6px 12px",
-                      }}
-                    >
-                      {monitoringModeCompact.category}: {monitoringModeCompact.value} hosts (100%)
-                    </span>
-                  ) : (
-                    <HubDonutChart data={monitoringModeDonut} height={200} emptyMessage="No host modes to chart." />
-                  )}
+                <div style={{ maxWidth: "560px", marginBottom: "12px" }}>
+                  <div
+                    style={{
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: density.cardRadius,
+                      padding: density.cardPadding,
+                      backgroundColor: theme.surface,
+                      display: "grid",
+                      gap: "8px",
+                      minWidth: 0,
+                    }}
+                  >
+                    <div style={{ fontSize: "13px", fontWeight: 700, color: theme.text }}>Monitoring mode mix</div>
+                    <div style={{ fontSize: "12px", color: theme.textSecondary }}>Distribution of agent monitoring modes across hosts.</div>
+                    {monitoringModeCompact ? (
+                      <span
+                        style={{
+                          display: "inline-block",
+                          fontSize: "13px",
+                          fontWeight: 700,
+                          color: theme.primaryText,
+                          backgroundColor: theme.surfaceSubtle,
+                          border: `1px solid ${theme.border}`,
+                          borderRadius: "999px",
+                          padding: "6px 12px",
+                        }}
+                      >
+                        {monitoringModeCompact.category}: {monitoringModeCompact.value} hosts (100%)
+                      </span>
+                    ) : (
+                      <HubDonutChart data={monitoringModeDonut} height={150} emptyMessage="No host modes to chart." />
+                    )}
+                  </div>
                 </div>
               </div>
               <WidgetCard
@@ -3548,11 +3605,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
                         label: "Traces %",
                         width: 90,
                         align: "right",
-                        render: (row) => (
-                          <span style={{ color: signalPctColor(row.traces_pct), fontWeight: 600 }}>
-                            {formatSignalPercent(row.traces_pct, telemetryRuntimeBlocked)}
-                          </span>
-                        ),
+                        render: (row) => renderTracePercentValue(row, telemetryRuntimeBlocked),
                       },
                       {
                         id: "app_mode_fit",
@@ -3631,7 +3684,7 @@ function DashboardView({ config }: { config: MappingConfig }) {
                   ) : null}
                   {signalAttentionCounts.tracesNo > 0 ? (
                     <span style={{ fontSize: "13px", fontWeight: 600, color: theme.text }}>
-                      {signalAttentionCounts.tracesNo} host{signalAttentionCounts.tracesNo === 1 ? "" : "s"} with Traces=NO
+                      {signalAttentionCounts.tracesNo} host{signalAttentionCounts.tracesNo === 1 ? "" : "s"} with Traces=NO (expected)
                     </span>
                   ) : null}
                   {signalAttentionCounts.overMonitored > 0 ? (
@@ -3692,10 +3745,10 @@ function DashboardView({ config }: { config: MappingConfig }) {
                           label: "Traces",
                           width: 90,
                           align: "center",
-                          getValue: (row) => resolveSignalStatus(row.traces_status, telemetryRuntimeBlocked),
+                          getValue: (row) => resolveTraceStatus(row.traces_status, row.monitoring_mode, telemetryRuntimeBlocked, row.service_count),
                           render: (row) => {
-                            const status = resolveSignalStatus(row.traces_status, telemetryRuntimeBlocked);
-                            return <span style={{ color: statusTone(status), fontWeight: 700 }}>{status}</span>;
+                            const status = resolveTraceStatus(row.traces_status, row.monitoring_mode, telemetryRuntimeBlocked, row.service_count);
+                            return <span style={{ color: traceStatusTone(status), fontWeight: status === "N/A" ? 600 : 700 }}>{status}</span>;
                           },
                         },
                         {
@@ -4864,8 +4917,8 @@ function DashboardView({ config }: { config: MappingConfig }) {
                       if (!row.signal_joined) {
                         return "-";
                       }
-                      const status = resolveSignalStatus(row.traces_status, telemetryRuntimeBlocked);
-                      return <span style={{ color: statusTone(status), fontWeight: 700 }}>{status}</span>;
+                      const status = resolveTraceStatus(row.traces_status, row.monitoring_mode, telemetryRuntimeBlocked, row.service_count);
+                      return <span style={{ color: traceStatusTone(status), fontWeight: status === "N/A" ? 600 : 700 }}>{status}</span>;
                     },
                   },
                   {
@@ -4900,7 +4953,11 @@ function DashboardView({ config }: { config: MappingConfig }) {
                     width: 90,
                     align: "right",
                     render: (row) => {
-                      if (!row.signal_joined || row.traces_status === "N/A") {
+                      if (!row.signal_joined) {
+                        return "-";
+                      }
+                      const traceStatus = resolveTraceStatus(row.traces_status, row.monitoring_mode, telemetryRuntimeBlocked, row.service_count);
+                      if (traceStatus === "N/A") {
                         return "-";
                       }
                       return formatSignalCount(row.spans_count_num, telemetryRuntimeBlocked);

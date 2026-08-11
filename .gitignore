@@ -58,3 +58,10 @@ coverage/
 # Temporary
 tmp/
 temp/
+
+# Shared secret and local auth hygiene
+.secrets.env
+*.secrets.env
+*.token
+*.tokens
+**/.tokens.json

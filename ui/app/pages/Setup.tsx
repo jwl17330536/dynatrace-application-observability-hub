@@ -308,7 +308,6 @@ function SourcePreview({
     }
     onColumnsDetected(source.sourceId, availableColumns);
     // availableColumnsKey stands in for availableColumns content.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: key encodes column set
   }, [availableColumnsKey, error, isLoading, onColumnsDetected, source.sourceId]);
 
   return (
