@@ -99,7 +99,7 @@ fetch dt.entity.host
 ## Next Steps for Validation
 
 ### Step 1: Deploy to Sprint Tenant
-**URL:** https://oei3894h.sprint.apps.dynatracelabs.com  
+**URL:** https://your-tenant.sprint.apps.dynatracelabs.com  
 **Methods:**
 - Option A: `dt-app deploy --app-id application-observability-hub`
 - Option B: Manual upload via Dynatrace UI → Settings → Apps
@@ -228,7 +228,7 @@ git status
 
 1. **Authenticate to Sprint Tenant:**
    ```bash
-   export DT_ENVIRONMENT=https://oei3894h.sprint.apps.dynatracelabs.com
+   export DT_ENVIRONMENT=https://your-tenant.sprint.apps.dynatracelabs.com
    dtctl auth login
    # Follow prompts to create new platform token
    ```

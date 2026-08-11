@@ -2,7 +2,7 @@
 
 **Status Date:** 2026-07-28  
 **Phase:** Phase 1 MVP  
-**App Live URL:** https://oei3894h.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
+**App Live URL:** https://your-tenant.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
 
 ---
 
@@ -69,7 +69,7 @@
 - See `VALIDATION_GUIDE.md` for sample data table to copy from
 
 **Step 2: Open App and Run Setup Wizard**
-- URL: https://oei3894h.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
+- URL: https://your-tenant.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
 - Setup wizard appears
 - Enter 4 field names: `app.tag`, `app.name`, `app.tier`, `app.owner`
 - Click "Save & Continue"
@@ -242,7 +242,7 @@ Same visualization code works with ALL adapters ✅
 
 **App doesn't load:**
 - Check network tab (404? DNS issue?)
-- Verify URL: https://oei3894h.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
+- Verify URL: https://your-tenant.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
 - Browser console: Any JavaScript errors?
 
 **Setup wizard doesn't appear:**

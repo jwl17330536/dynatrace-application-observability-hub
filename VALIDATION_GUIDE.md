@@ -2,7 +2,7 @@
 
 **Status:** App Deployed ✅  
 **Date:** 2026-07-28  
-**Sprint Tenant:** https://oei3894h.sprint.apps.dynatracelabs.com
+**Sprint Tenant:** https://your-tenant.sprint.apps.dynatracelabs.com
 
 ---
 
@@ -11,7 +11,7 @@
 ### 1. Open the App
 Go to Dynatrace → Apps → Search for "Application Observability Hub"
 
-Or direct URL: https://oei3894h.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
+Or direct URL: https://your-tenant.sprint.apps.dynatracelabs.com/ui/apps/my.application.observability.hub
 
 ### 2. Tag Sample Hosts (Manual)
 
@@ -212,7 +212,7 @@ See `PHASE_2_ROADMAP.md` for 4-week plan to:
 Open browser DevTools → Console:
 ```javascript
 // Fetch from Document Store
-fetch('https://oei3894h.sprint.apps.dynatracelabs.com/platform/storage/resource-store/v1/files/observability-hub-app-config-v1', {
+fetch('https://your-tenant.sprint.apps.dynatracelabs.com/platform/storage/resource-store/v1/files/observability-hub-app-config-v1', {
   headers: { 'Authorization': 'Bearer YOUR_TOKEN' }
 })
 .then(r => r.json())
@@ -243,7 +243,7 @@ Available hosts to tag:
 - automation (Ops infrastructure)
 - ns0, ns1, nslb (Network)
 - nuc40, nuc41, nuc42, nuc43, nuc44, nuc45, nuc46 (Compute nodes)
-- torrent, mail, minecraft.lindleyhome.com, plex, EasyTravel on Windows (Other)
+- torrent, mail, minecraft.example-home.com, plex, EasyTravel on Windows (Other)
 
 **Recommendation:** Tag dt01-03, automation, and 4 NUC hosts (8 total) for a realistic test scenario.
 

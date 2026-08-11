@@ -63,7 +63,7 @@
       }
     ]
   },
-  "environmentUrl": "https://oei3894h.sprint.apps.dynatracelabs.com",
+  "environmentUrl": "https://your-tenant.sprint.apps.dynatracelabs.com",
   "build": {
     "sourceRoot": "ui"
   }

@@ -36,7 +36,7 @@ export function getPlatformOrigin(): string {
   } catch {
     // fall through
   }
-  // Strip app-instance prefix: {hash}--oei3894h.hard2.sprint… → oei3894h.hard2.sprint…
+  // Strip app-instance prefix: {hash}--your-tenant.hard2.sprint… → your-tenant.hard2.sprint…
   const host = window.location.hostname;
   if (host.includes("--")) {
     return `${window.location.protocol}//${host.replace(/^[^.]+--/, "")}`;

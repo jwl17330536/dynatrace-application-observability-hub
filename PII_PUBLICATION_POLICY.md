@@ -12,9 +12,9 @@ A change must not be merged to `main` (or used for public release) unless all re
 
 ## What We Search
 1. Tenant/domain/email literals:
-- `oei3894h`
-- `lindleyhome`
-- `@lindleyhome.com`
+- `your-tenant`
+- `example-home`
+- `@example.com`
 2. Personal name markers:
 - `john`
 - `lindley`

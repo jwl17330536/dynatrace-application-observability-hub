@@ -197,7 +197,7 @@ Expected table output:
 ## Step 5: Deploy to Sprint Tenant (5 min)
 
 ```bash
-export DT_ENVIRONMENT=https://oei3894h.sprint.apps.dynatracelabs.com
+export DT_ENVIRONMENT=https://your-tenant.sprint.apps.dynatracelabs.com
 export DT_API_TOKEN="<your-dynatrace-api-token>"  # Token with app_management scope
 
 cd /Users/john/dev/application-observability-hub
