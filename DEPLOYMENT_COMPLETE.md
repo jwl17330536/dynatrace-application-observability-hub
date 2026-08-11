@@ -45,7 +45,7 @@
 
 ### DevOps
 - ✅ Git initialized and 8 commits on main branch
-- ✅ GitHub repository public: https://github.com/jwl17330536/application-observability-hub
+- ✅ GitHub repository public: https://github.com/jwl17330536/dynatrace-application-observability-hub
 - ✅ Deployment: Used `dt-app deploy` CLI (works, no manual upload needed)
 - ✅ App ID: Fixed to `my.application.observability.hub` (required `my.` namespace)
 - ✅ No hardcoded secrets: All documentation uses placeholders
@@ -137,7 +137,7 @@ See `PHASE_2_ROADMAP.md`:
 
 ## 🚀 GITHUB REPOSITORY
 
-**URL:** https://github.com/jwl17330536/application-observability-hub
+**URL:** https://github.com/jwl17330536/dynatrace-application-observability-hub
 
 **Commits (8 total):**
 ```

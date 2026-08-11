@@ -3,7 +3,7 @@
 ## Project Structure Summary
 
 ```
-application-observability-hub/
+dynatrace-application-observability-hub/
 ├── ui/app/
 │   ├── pages/           # Route pages (Home, Onboarding, Overview, etc.)
 │   ├── components/      # Reusable UI components (MappingForm, TenantSelector, etc.)

@@ -1,5 +1,5 @@
 {
-  "name": "application-observability-hub",
+  "name": "dynatrace-application-observability-hub",
   "version": "0.1.85",
   "description": "Configurable multi-tenant Dynatrace Hub App for application observability with flexible data source support (tags, CMDB lookups, DQL)",
   "license": "Apache-2.0",

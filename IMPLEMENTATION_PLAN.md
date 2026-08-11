@@ -107,7 +107,7 @@ Render generic table from results
 
 ## GitHub Setup
 
-**Repo:** `jwl17330536/application-observability-hub` (public, Apache 2.0)
+**Repo:** `jwl17330536/dynatrace-application-observability-hub` (public, Apache 2.0)
 
 **Branch strategy:**
 - `main` — Production-ready builds

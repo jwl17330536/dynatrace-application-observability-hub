@@ -33,7 +33,7 @@
 
 ### 1. Build (Already Done)
 ```bash
-cd /Users/john/dev/application-observability-hub
+cd /Users/john/dev/dynatrace-application-observability-hub
 npm run build
 # Output: dist/ui/ with main.js, main.css, index.html
 ```
@@ -41,7 +41,7 @@ npm run build
 ### 2. Deploy to Sprint Tenant
 ```bash
 # Option A: dt-app CLI
-dt-app deploy --app-id application-observability-hub
+dt-app deploy --app-id dynatrace-application-observability-hub
 
 # Option B: Manual (via Dynatrace UI)
 # Go to Settings → Apps → Upload
@@ -75,13 +75,13 @@ Add tags:
 
 ### Initialize Repo
 ```bash
-cd /Users/john/dev/application-observability-hub
+cd /Users/john/dev/dynatrace-application-observability-hub
 
 # Initialize git
 git init
 
 # Add remote
-git remote add origin https://github.com/jwl17330536/application-observability-hub.git
+git remote add origin https://github.com/jwl17330536/dynatrace-application-observability-hub.git
 
 # Add and commit
 git add -A
