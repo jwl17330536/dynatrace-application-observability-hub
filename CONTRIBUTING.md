@@ -1,5 +1,11 @@
 # Contributing
 
+## Scope Boundary
+
+1. End users should follow `README.md` and `QUICK_START.md`.
+2. Contributor-only guidance stays in this file and deeper implementation docs.
+3. Changes must preserve a clean first-time install path for public users.
+
 ## Development Setup
 
 1. Install dependencies:
