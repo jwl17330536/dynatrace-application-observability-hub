@@ -12,6 +12,7 @@ build/
 .env
 .env.local
 .env.*.local
+.envrc
 secrets.txt
 *.pem
 *.key
@@ -34,13 +35,16 @@ yarn-debug.log*
 /docs/planning/
 /docs/internal/
 /scratch/
+local-only/
+docs/local-only/
+*.local.md
 CLAUDE.md
 .instructions.md
 .claude/
 
 # Dynatrace App Toolkit — auth tokens and local dev config with real tenant URL
 .dt-app/
-app.config.json
+app.config.local.json
 
 # Compiled artifacts
 *.zip
