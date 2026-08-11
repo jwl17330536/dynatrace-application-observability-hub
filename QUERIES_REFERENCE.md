@@ -328,7 +328,7 @@ APPLICATION
 
 ---
 
-## Questions for User (John)
+## Questions for User
 
 1. **Actual DQL Requirements:**
    - For Overview: How should we count actual traces/metrics/logs ingested per app? (Join with metrics? Query logs API?)

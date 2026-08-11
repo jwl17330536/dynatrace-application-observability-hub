@@ -16,8 +16,8 @@ A change must not be merged to `main` (or used for public release) unless all re
 - `example-home`
 - `@example.com`
 2. Personal name markers:
-- `john`
-- `lindley`
+- `<given-name>`
+- `<family-name>`
 3. Potential public IPv4 literals (with private/test ranges excluded).
 4. Credential/secret indicators:
 - Dynatrace token patterns (`dt0...`)
