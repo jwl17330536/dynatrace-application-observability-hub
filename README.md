@@ -27,7 +27,19 @@ Lookup-first Dynatrace app for browsing application inventory from one or many D
 
 1. Follow [QUICK_START.md](QUICK_START.md) for the shortest install path.
 2. Use [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed mapping guidance.
-3. Use [VALIDATION_GUIDE.md](VALIDATION_GUIDE.md) to verify runtime behavior.
+3. Use [VALIDATION_GUIDE.md](VALIDATION_GUIDE.md) only when validating or troubleshooting mappings.
+
+## Install Boundary
+
+Required for first-time install:
+
+1. App deploy command path in [QUICK_START.md](QUICK_START.md).
+2. Runtime lookup source data with a Unique Application ID field.
+
+Not required for initial install:
+
+1. Internal architecture and implementation notes.
+2. Local-only scaffolding described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Developer Workflow
 

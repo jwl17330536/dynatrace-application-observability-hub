@@ -8,11 +8,19 @@
 
 ## Deploy
 
+Minimal install path:
+
+1. Install dependencies.
+2. Build app bundle.
+3. Deploy app.
+
 ```bash
 npm install
 npm run build
 npx dt-app deploy --non-interactive
 ```
+
+Use `SETUP_GUIDE.md` for advanced mapping scenarios and `VALIDATION_GUIDE.md` for troubleshooting.
 
 ## Configure
 
