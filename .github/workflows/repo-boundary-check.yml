@@ -1,4 +1,4 @@
-name: Repo Boundary Check
+name: App Obs Hub — repo boundary
 
 on:
   pull_request:

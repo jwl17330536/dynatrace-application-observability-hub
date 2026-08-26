@@ -1,4 +1,4 @@
-name: Public Release Gate
+name: App Obs Hub — public gate
 
 on:
   pull_request:
