@@ -1,8 +1,7 @@
-name: Repository Hygiene
+name: App Obs Hub — repo hygiene
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   hygiene:
